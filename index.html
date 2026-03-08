@@ -10,8 +10,8 @@
 <body>
   <div id="root"></div>
 
-  <script type="text/babel">
-    const { useState, useRef, useEffect, useCallback } = React;
+<script type="text/babel">
+const { useState, useRef, useEffect, useCallback } = React;
 
 const ROUNDS_MAX = 5;
 const PLAYERS = 3;
@@ -90,13 +90,19 @@ function checkLog(pts) {
   return{hit:false};
 }
 
-function bounceFromLog(hx,hy,inVx,inVy) {
+function bounceFromLog(hx,hy,inVx,inVy, deterministic=false) {
   const angle=Math.atan2(Math.abs(inVy),Math.abs(inVx));
   const goRight=angle<Math.PI/3.5;
   const speed=Math.sqrt(inVx*inVx+inVy*inVy);
-  const reducedSpeed=speed*(0.2+Math.random()*0.15);
-  const bvx=goRight? reducedSpeed*(0.6+Math.random()*0.3):-reducedSpeed*(0.5+Math.random()*0.3);
-  const bvy=-reducedSpeed*(0.3+Math.random()*0.4);
+  const baseReducedSpeed=speed*0.2;
+  const randOffset=deterministic ? 0.075 : Math.random()*0.15;
+  const reducedSpeed=baseReducedSpeed + speed*randOffset;
+  const bvxBase=goRight? 0.6 : -0.5;
+  const bvxRand=deterministic ? 0.15 : Math.random()*0.3;
+  const bvx=goRight? reducedSpeed*(bvxBase+bvxRand):-reducedSpeed*(bvxBase+bvxRand);
+  const bvyBase=-0.35;
+  const bvyRand=deterministic ? 0.2 : Math.random()*0.4;
+  const bvy=reducedSpeed*(bvyBase-bvyRand);
   const floorY=FIELD_BOT-10;
   const pts=[];
   let x=hx+(bvx>0?3:-3),y=hy,vx=bvx,vy=bvy;
@@ -123,11 +129,24 @@ function judgeLanding(pts) {
   return{inZone:false};
 }
 
-function initGame() {
+function initGame(gameMode = "normal", maxStreakOverride = 0) {
+  if(gameMode === "challenge") {
+    return {
+      round:1, phase:"throwing", turn:0, playerIdx:0,
+      score:0, streak:0, maxStreak:maxStreakOverride,
+      log:[], gameMode:"challenge",
+    };
+  }
+  if(gameMode === "practice") {
+    return {
+      round:1, phase:"throwing", turn:0, playerIdx:0,
+      log:[], gameMode:"practice", showTrajectory: true,
+    };
+  }
   return {
     round:1, phase:"throwing", turn:0, playerIdx:0,
     scores:[Array(ROUNDS_MAX).fill(0),Array(ROUNDS_MAX).fill(0)],
-    roundMarkers:[], log:[], maxRounds:ROUNDS_MAX,
+    roundMarkers:[], log:[], maxRounds:ROUNDS_MAX, gameMode:"normal",
   };
 }
 
@@ -139,6 +158,15 @@ function App() {
   const [anim, setAnim] = useState(null);
   const [throwing, setThrowing] = useState(false);
   const [lastResult, setLastResult] = useState(null);
+  const [challengeRecord, setChallengeRecord] = useState(0);
+  const [scores, setScores] = useState(() => {
+    try {
+      const saved = localStorage.getItem("kurudugaScores");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const canvasRef = useRef(null);
   const logRef = useRef(null);
   const animRef = useRef(null);
@@ -157,30 +185,21 @@ function App() {
     const timer = setTimeout(() => {
       const ox = THROW_X, oy = playerY(g.playerIdx);
       
-      // 難易度に応じた狙う高さを決定
       let targetY, powerPercent;
       if(aiDiff >= 0.7) {
-        // hard: 丸太上部を狙う（3pt狙い、パワー30%）
         targetY = LOG_TOP + 10;
         powerPercent = 0.30;
       } else if(aiDiff >= 0.4) {
-        // normal: 丸太中央上寄りを狙う（2pt狙い、パワー25%）
         targetY = LOG_TOP + (LOG_BOT - LOG_TOP) * 0.3;
         powerPercent = 0.25;
       } else {
-        // easy: 丸太中央を狙う（パワー15%）
         targetY = (LOG_TOP + LOG_BOT) / 2;
         powerPercent = 0.15;
       }
       
-      // 目標高さに向かうドラッグを計算
       const needDy = targetY - oy;
-      
-      // パワー％からドラッグ量を計算（下向きドラッグ）
       const dx = -DRAG_MAX * powerPercent;
-      const dy = DRAG_MAX * powerPercent * 0.4 + (needDy * 0.1);  // パワーと目標高さを組み合わせ
-      
-      // ノイズを加える（難易度が高いほど減る）
+      const dy = DRAG_MAX * powerPercent * 0.4 + (needDy * 0.1);
       const noise = (1 - aiDiff) * 20;
       const finalDx = dx + (Math.random() - 0.5) * noise;
       const finalDy = dy + (Math.random() - 0.5) * noise * 0.2;
@@ -194,13 +213,14 @@ function App() {
   const executeThrow = (ox, oy, vx, vy) => {
     const flyPts = simTraj(ox, oy, vx, vy, 140);
     const col = checkLog(flyPts);
-    let result, fullPts;
+    let result, fullPts, bouncePts = null;
+    const isDeterministic = g.gameMode === "practice";
     if(!col.hit) {
       result = {hitMarutai:false, pts:0, inZone:false};
       fullPts = flyPts;
     } else {
       const prePts = flyPts.slice(0, col.idx+1);
-      const bouncePts = bounceFromLog(col.hx, col.hy, col.vx, col.vy);
+      bouncePts = bounceFromLog(col.hx, col.hy, col.vx, col.vy, isDeterministic);
       const landing = judgeLanding(bouncePts);
       result = landing.inZone
         ? {hitMarutai:true, pts:landing.zone.pts, lx:landing.lx, ly:landing.ly, zoneIdx:landing.zoneIdx, zone:landing.zone, inZone:true}
@@ -210,7 +230,7 @@ function App() {
     setLastResult(result);
     setThrowing(true);
     let idx = 0;
-    setAnim({pts:fullPts, idx});
+    setAnim({pts:fullPts, idx, bouncePts: bouncePts, col: col});
     const tick = () => {
       idx += 3;
       if(idx >= fullPts.length) {
@@ -226,6 +246,57 @@ function App() {
 
   const finishThrow = (result) => {
     setG(prev => {
+      if(prev.gameMode === "practice") {
+        const logLine = result.hitMarutai && result.inZone
+          ? `${prev.round}投目: ${result.pts}点（命中位置: ${result.zoneIdx + 1}pt ゾーン）`
+          : result.hitMarutai
+          ? `${prev.round}投目: 丸太命中 → ゾーン外`
+          : `${prev.round}投目: 外れ`;
+        return {
+          ...prev,
+          round: prev.round + 1,
+          log: [...prev.log, logLine]
+        };
+      }
+
+      if(prev.gameMode === "challenge") {
+        const logLine = result.hitMarutai && result.inZone
+          ? `${prev.round}投目: ${result.pts}点ゲット！（合計${prev.score + result.pts}点）`
+          : result.hitMarutai
+          ? `${prev.round}投目: ゾーン外...（合計${prev.score}点）`
+          : `${prev.round}投目: 外れ...`;
+        
+        const newScore = prev.score + (result.inZone ? result.pts : 0);
+        const isGameOver = !result.hitMarutai || (result.hitMarutai && !result.inZone);
+        const newStreak = isGameOver ? 0 : prev.streak + 1;
+        const newMaxStreak = Math.max(prev.maxStreak, newStreak);
+        
+        if(isGameOver) {
+          setChallengeRecord(newMaxStreak);
+          const newScoreRecord = { score: newScore, streak: newMaxStreak, date: new Date().toLocaleDateString('ja-JP') };
+          const updatedScores = [newScoreRecord, ...scores].sort((a, b) => b.score - a.score).slice(0, 10);
+          setScores(updatedScores);
+          localStorage.setItem("kurudugaScores", JSON.stringify(updatedScores));
+          return {
+            ...prev,
+            score: newScore,
+            streak: 0,
+            maxStreak: newMaxStreak,
+            phase: "gameEnd",
+            log: [...prev.log, logLine]
+          };
+        } else {
+          return {
+            ...prev,
+            round: prev.round + 1,
+            score: newScore,
+            streak: newStreak,
+            maxStreak: newMaxStreak,
+            log: [...prev.log, logLine]
+          };
+        }
+      }
+
       const team = prev.turn, player = prev.playerIdx;
       const TEAM_NAME = mode === "ai" ? TEAM_NAME_AI : TEAM_NAME_PVP;
       const logLine = result.hitMarutai
@@ -331,7 +402,7 @@ function App() {
     }
     ctx.restore();
 
-    g.roundMarkers.forEach((m, i) => {
+    g.roundMarkers?.forEach((m, i) => {
       const zx = ZONE_X + m.zoneIdx * ZONE_W;
       const mx = zx + ZONE_W/2 + (i%2 === 0 ? -10 : 10);
       ctx.beginPath();
@@ -390,6 +461,20 @@ function App() {
           ctx.strokeStyle = "#fff";
           ctx.lineWidth = 2;
           ctx.stroke();
+          
+          if(g.gameMode === "practice") {
+            const bouncePts = bounceFromLog(col.hx, col.hy, col.vx, col.vy, true);
+            ctx.strokeStyle = "#ff0000";
+            ctx.lineWidth = 3;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            bouncePts.forEach((pt, i) => {
+              if(i === 0) ctx.moveTo(pt.x, pt.y);
+              else ctx.lineTo(pt.x, pt.y);
+            });
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
         }
         const pct = clamp / DRAG_MAX;
         ctx.fillStyle = "#0003";
@@ -421,25 +506,19 @@ function App() {
         ctx.fill();
         ctx.strokeStyle = isActive ? TEAM_COLOR[g.turn] : "#bbb";
         ctx.lineWidth = isActive ? 2.5 : 1.5;
-        ctx.setLineDash(isActive && !drag && !isAI ? [4, 3] : []);
+        ctx.setLineDash(isActive && !drag ? [4, 3] : []);
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.fillStyle = isActive ? TEAM_COLOR[g.turn] : "#888";
         ctx.font = `${isActive ? "bold " : ""}${isActive ? 12 : 10}px sans-serif`;
         ctx.textAlign = "center";
-        ctx.fillText(isAI && isActive ? "AI" : `P${i+1}`, THROW_X, py + 4);
+        ctx.fillText(`P${i+1}`, THROW_X, py + 4);
       });
-      if(!drag && !(mode === "ai" && g.turn === 1)) {
-        ctx.fillStyle = TEAM_COLOR[g.turn] + "cc";
+      if(!drag) {
+        ctx.fillStyle = TEAM_COLOR[g.gameMode === "challenge" ? 0 : g.turn] + "cc";
         ctx.font = "10px sans-serif";
         ctx.textAlign = "center";
         ctx.fillText("← 引いて離す", THROW_X, playerY(2) + 40);
-      }
-      if(mode === "ai" && g.turn === 1 && !throwing) {
-        ctx.fillStyle = TEAM_COLOR[1] + "cc";
-        ctx.font = "bold 11px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("AI 思考中...", THROW_X, playerY(2) + 40);
       }
     }
   }, [g, drag, throwing, anim, mode]);
@@ -489,32 +568,73 @@ function App() {
     return a > b ? `${TEAM_NAME[0]} の勝利！` : b > a ? `${TEAM_NAME[1]} の勝利！` : "引き分け";
   };
 
-  const startGame = (m) => { setMode(m); setG(initGame()); setLastResult(null); };
+  const startGame = (m) => { 
+    setMode(m);
+    if(m === "challenge") {
+      setG(initGame("challenge", challengeRecord));
+    } else {
+      setG(initGame());
+    }
+    setLastResult(null); 
+  };
+
+  const getRank = (score) => {
+    if(score >= 25) return { rank: "S", color: "#FFD700" };
+    if(score >= 20) return { rank: "A", color: "#FF6B6B" };
+    if(score >= 15) return { rank: "B", color: "#FFC107" };
+    if(score >= 10) return { rank: "C", color: "#2196F3" };
+    if(score >= 5) return { rank: "D", color: "#9E9E9E" };
+    return { rank: "D", color: "#AAAAAA" };
+  };
 
   if(!mode) return (
     <div style={{fontFamily:"'Hiragino Sans','Meiryo',sans-serif",background:"#344e30",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
       <h2 style={{color:"#e0e0e0",letterSpacing:3,fontSize:28,margin:0}}>クルドゥガ</h2>
-      <p style={{color:"#666",fontSize:12,margin:0}}>日本ナウル協会 公式ルール準拠</p>
-      <div style={{display:"flex",gap:16,marginTop:16}}>
-        <button onClick={() => startGame("pvp")}
-          style={{padding:"18px 36px",background:"#6092ff",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #1d4ed844"}}>
-          対戦
-        </button>
-        <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
-          <button onClick={() => startGame("ai")}
-            style={{padding:"18px 36px",background:"#b45309",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #b4530944"}}>
-            AI対戦
+      <p style={{color:"#ffffff",fontSize:12,margin:0}}>参考：公式ルール</p>
+      <div style={{display:"flex",gap:16,marginTop:16,flexDirection:"column",alignItems:"center"}}>
+        <div style={{display:"flex",gap:16}}>
+          <button onClick={() => startGame("pvp")}
+            style={{padding:"18px 36px",background:"#6092ff",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #1d4ed844"}}>
+            対戦
           </button>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{color:"#aaa",fontSize:11}}>易</span>
-            <input type="range" min="0" max="1" step="0.1" value={aiDiff}
-              onChange={(e) => setAiDiff(parseFloat(e.target.value))}
-              style={{width:100,accentColor:"#f59e0b"}}/>
-            <span style={{color:"#aaa",fontSize:11}}>難</span>
-            <span style={{color:"#f59e0b",fontSize:11,fontWeight:"bold"}}>{aiDiff<=0.3?"かんたん":aiDiff<=0.6?"ふつう":"むずかしい"}</span>
+          <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
+            <button onClick={() => startGame("ai")}
+              style={{padding:"18px 36px",background:"#b45309",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #b4530944"}}>
+              AI対戦
+            </button>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{color:"#aaa",fontSize:11}}>易</span>
+              <input type="range" min="0" max="1" step="0.1" value={aiDiff}
+                onChange={(e) => setAiDiff(parseFloat(e.target.value))}
+                style={{width:100,accentColor:"#f59e0b"}}/>
+              <span style={{color:"#aaa",fontSize:11}}>難</span>
+              <span style={{color:"#f59e0b",fontSize:11,fontWeight:"bold"}}>{aiDiff<=0.3?"かんたん":aiDiff<=0.6?"ふつう":"むずかしい"}</span>
+            </div>
           </div>
         </div>
+        <div style={{display:"flex",gap:16}}>
+          <button onClick={() => startGame("challenge")}
+            style={{padding:"18px 36px",background:"#10b981",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #10b98144"}}>
+            どこまでチャレンジ
+          </button>
+          <button onClick={() => { setMode("practice"); setG(initGame("practice")); setLastResult(null); }}
+            style={{padding:"18px 36px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #8b5cf644"}}>
+            練習モード
+          </button>
+        </div>
       </div>
+      
+      {scores.length > 0 && (
+        <div style={{marginTop:20,background:"#1a1a1a",borderRadius:10,padding:"12px 16px",maxWidth:400}}>
+          <div style={{color:"#10b981",fontSize:12,marginBottom:8,fontWeight:"bold"}}>チャレンジ ハイスコア Top 5</div>
+          {scores.slice(0, 5).map((s, i) => (
+            <div key={i} style={{color:"#ccc",fontSize:11,marginBottom:4,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span>#{i+1} <span style={{color:"#10b981",fontWeight:"bold"}}>{s.score}点</span> (連続{s.streak}投)</span>
+              <span style={{color:"#888",fontSize:10}}>{s.date}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 
@@ -528,25 +648,41 @@ function App() {
       </div>
 
       <div style={{display:"flex",gap:10,marginBottom:8,width:"100%",maxWidth:CW}}>
-        {[0,1].map(t => (
-          <div key={t} style={{flex:1,background:TEAM_BG[t],borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
-            <div style={{fontWeight:"bold",color:TEAM_COLOR[t],fontSize:12}}>
-              {TEAM_NAME[t]}{mode==="ai"&&t===1&&<span style={{fontSize:10,marginLeft:4}}>AI</span>}
-            </div>
-            <div style={{fontSize:22,fontWeight:"bold",color:TEAM_COLOR[t]}}>{total(t)}<span style={{fontSize:11}}>点</span></div>
-            <div style={{fontSize:10,color:"#666"}}>
-              {Array.from({length:g.maxRounds}, (_,i) => (
-                <span key={i} style={{marginRight:4,color:i<g.round-1?TEAM_COLOR[t]:"#bbb"}}>R{i+1}:{g.scores[t][i]??0}</span>
-              ))}
-            </div>
+        {g.gameMode === "challenge" ? (
+          <div style={{flex:1,background:"#d4f4e4",borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
+            <div style={{fontWeight:"bold",color:"#10b981",fontSize:12}}>チャレンジ</div>
+            <div style={{fontSize:22,fontWeight:"bold",color:"#10b981"}}>{g.score}<span style={{fontSize:11}}>点</span></div>
+            <div style={{fontSize:10,color:"#666"}}>連続成功: {g.streak} / 最高記録: {g.maxStreak}</div>
           </div>
-        ))}
+        ) : g.gameMode === "practice" ? (
+          <div style={{flex:1,background:"#f3e8ff",borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
+            <div style={{fontWeight:"bold",color:"#8b5cf6",fontSize:12}}>練習モード</div>
+            <div style={{fontSize:22,fontWeight:"bold",color:"#8b5cf6"}}>{g.round-1}<span style={{fontSize:11}}>投</span></div>
+            <div style={{fontSize:10,color:"#666"}}>軌道を確認できます</div>
+          </div>
+        ) : (
+          [0,1].map(t => (
+            <div key={t} style={{flex:1,background:TEAM_BG[t],borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
+              <div style={{fontWeight:"bold",color:TEAM_COLOR[t],fontSize:12}}>
+                {TEAM_NAME[t]}{mode==="ai"&&t===1&&<span style={{fontSize:10,marginLeft:4}}>AI</span>}
+              </div>
+              <div style={{fontSize:22,fontWeight:"bold",color:TEAM_COLOR[t]}}>{total(t)}<span style={{fontSize:11}}>点</span></div>
+              <div style={{fontSize:10,color:"#666"}}>
+                {Array.from({length:g.maxRounds}, (_,i) => (
+                  <span key={i} style={{marginRight:4,color:i<g.round-1?TEAM_COLOR[t]:"#bbb"}}>R{i+1}:{g.scores[t][i]??0}</span>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       <div style={{fontSize:12,color:"#aaa",marginBottom:6,textAlign:"center"}}>
-        {g.phase==="throwing"&&<>R{g.round}{g.round>ROUNDS_MAX?"（延長）":""} — <span style={{color:TEAM_COLOR[g.turn],fontWeight:"bold"}}>{TEAM_NAME[g.turn]} P{g.playerIdx+1} の番</span></>}
-        {g.phase==="roundEnd"&&<span style={{color:"#f59e0b"}}>R{g.round-1} 終了 — 陣地交代</span>}
-        {g.phase==="gameEnd"&&<span style={{color:"#f87171",fontWeight:"bold"}}>ゲーム終了</span>}
+        {g.gameMode === "challenge" ? (
+          <>投{g.round}目</>
+        ) : (
+          <>R{g.round}{g.round>ROUNDS_MAX?"（延長）":""} — <span style={{color:TEAM_COLOR[g.turn],fontWeight:"bold"}}>{TEAM_NAME[g.turn]} P{g.playerIdx+1} の番</span></>
+        )}
       </div>
 
       <div style={{position:"relative",width:"100%",maxWidth:CW}}>
@@ -574,10 +710,42 @@ function App() {
         )}
         {g.phase==="gameEnd"&&(
           <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#000b",borderRadius:12}}>
-            <div style={{fontSize:22,fontWeight:"bold",color:"#fbbf24",marginBottom:10}}>{winner()}</div>
-            <div style={{color:"#ccc",fontSize:14,marginBottom:16}}>あなた: {total(0)}点 / {mode==="ai"?"AI":"相手"}: {total(1)}点</div>
+            {g.gameMode === "practice" ? (
+              <>
+                <div style={{fontSize:22,fontWeight:"bold",color:"#8b5cf6",marginBottom:10}}>練習終了</div>
+                <div style={{color:"#ccc",fontSize:14,marginBottom:16}}>
+                  総投数: {g.round - 1}投
+                </div>
+              </>
+            ) : g.gameMode === "challenge" ? (
+              <>
+                <div style={{fontSize:22,fontWeight:"bold",color:"#10b981",marginBottom:10}}>ゲームオーバー</div>
+                <div style={{color:"#ccc",fontSize:14,marginBottom:16}}>
+                  最終スコア: {g.score}点<br/>
+                  最高連続成功: {g.maxStreak}投<br/>
+                  <span style={{fontSize:12, color: "#ccc"}}>
+                    記録をTwitter（現X）に投稿しよう！！
+                  </span>
+                </div>
+                <button onClick={() => {
+                  const rankInfo = getRank(g.score);
+                  const text = `クルドゥガでチャレンジ！\n${rankInfo.rank} ランク\n最終スコア: ${g.score}点\n最高連続成功: ${g.maxStreak}投\n#クルドゥガ\n#気にナウル`;
+                  const url = encodeURIComponent("\nhttps://dayu-otya.github.io/KRDG/");
+                  const tweetText = encodeURIComponent(text);
+                  window.open(`https://twitter.com/intent/tweet?text=${tweetText}&url=${url}`, '_blank');
+                }}
+                  style={{padding:"8px 16px",background:"#1DA1F2",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer",marginBottom:10}}>
+                  Xで投稿する
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{fontSize:22,fontWeight:"bold",color:"#fbbf24",marginBottom:10}}>{winner()}</div>
+                <div style={{color:"#ccc",fontSize:14,marginBottom:16}}>あなた: {total(0)}点 / {mode==="ai"?"AI":"相手"}: {total(1)}点</div>
+              </>
+            )}
             <div style={{display:"flex",gap:10}}>
-              <button onClick={() => {setLastResult(null);setG(initGame());}}
+              <button onClick={() => {setLastResult(null);setG(g.gameMode === "challenge" ? initGame("challenge", challengeRecord) : g.gameMode === "practice" ? initGame("practice") : initGame());}}
                 style={{padding:"10px 20px",background:"#f59e0b",color:"#000",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>
                 もう一度
               </button>
