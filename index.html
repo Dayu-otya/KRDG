@@ -1,389 +1,606 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>クルドゥガ - 日本ナウル協会公式ルール準拠</title>
-    <style>
-        body {
-            font-family: 'Hiragino Sans','Meiryo',sans-serif;
-            background: #1a1a2e;
-            color: #e0e0e0;
-            margin: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 14px;
-            min-height: 100vh;
-        }
-        h2 { margin: 0 0 2px; letter-spacing: 2px; }
-        .sub-title { color: #888; font-size: 11px; margin-bottom: 8px; }
-        .score-container { display: flex; gap: 10px; margin-bottom: 8px; width: 100%; max-width: 760px; }
-        .score-box { flex: 1; border-radius: 8px; padding: 5px 12px; text-align: center; }
-        .team-a-box { background: #dbeafe; color: #1d4ed8; }
-        .team-b-box { background: #fef3c7; color: #b45309; }
-        .score-val { font-size: 22px; font-weight: bold; }
-        .score-val span { font-size: 11px; }
-        .round-info { font-size: 10px; opacity: 0.8; }
-        .status-text { font-size: 12px; color: #aaa; margin-bottom: 6px; height: 18px; }
-        .canvas-wrapper { position: relative; width: 100%; max-width: 760px; }
-        canvas {
-            display: block; width: 100%; border-radius: 12px;
-            background: #e8f0e0; box-shadow: 0 4px 20px #0009;
-            touch-action: none; cursor: crosshair;
-        }
-        .overlay {
-            position: absolute; inset: 0; display: none;
-            align-items: center; justify-content: center;
-            background: rgba(0,0,0,0.7); border-radius: 12px;
-            flex-direction: column;
-        }
-        .btn {
-            padding: 12px 28px; border: none; border-radius: 10px;
-            font-size: 15px; font-weight: bold; cursor: pointer; color: #fff;
-        }
-        .btn-next { background: #7c3aed; }
-        .btn-restart { background: #f59e0b; color: #000; }
-        .log-area {
-            width: 100%; max-width: 760px; background: #111;
-            border-radius: 10px; padding: 7px 12px; height: 100px;
-            overflow-y: auto; font-size: 11px; color: #ccc; margin-top: 10px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <title>クルドゥガ</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
+  <div id="root"></div>
 
-<h2>クルドゥガ</h2>
-<p class="sub-title">日本ナウル協会 公式ルール準拠</p>
+  <script type="text/babel">
+    const { useState, useRef, useEffect, useCallback } = React;
 
-<div class="score-container">
-    <div class="score-box team-a-box">
-        <div style="font-weight:bold; font-size:12px;">チームA</div>
-        <div class="score-val" id="score-a">0<span>点</span></div>
-        <div class="round-info" id="rounds-a"></div>
-    </div>
-    <div class="score-box team-b-box">
-        <div style="font-weight:bold; font-size:12px;">チームB</div>
-        <div class="score-val" id="score-b">0<span>点</span></div>
-        <div class="round-info" id="rounds-b"></div>
-    </div>
-</div>
-
-<div class="status-text" id="status">準備中...</div>
-
-<div class="canvas-wrapper">
-    <canvas id="gameCanvas" width="760" height="420"></canvas>
-    <div id="overlay" class="overlay"></div>
-</div>
-
-<div class="log-area" id="log">
-    <div style="color:#444; font-size:10px;">投擲ログ</div>
-</div>
-
-<script>
-// --- ゲーム定数 ---
 const ROUNDS_MAX = 5;
 const PLAYERS = 3;
-const CW = 760; const CH = 420;
+const CW = 760;
+const CH = 420;
+
 const THROW_X = 80;
-const FIELD_TOP = 60; const FIELD_BOT = CH - 60;
+const FIELD_TOP = 60;
+const FIELD_BOT = CH - 60;
 const FIELD_MID = (FIELD_TOP + FIELD_BOT) / 2;
-const PLAYER_SPACING = 60;
-const LOG_CX = 340; const LOG_W = 52; const LOG_RY = 26;
-const LOG_TOP = FIELD_TOP + 30; const LOG_BOT = FIELD_BOT - 30;
-const ZONE_X = LOG_CX + LOG_W / 2 + 20;
+
+const LOG_CX  = 340;
+const LOG_TOP = FIELD_TOP + 30;
+const LOG_BOT = FIELD_BOT - 30;
+const LOG_W   = 52;
+const LOG_RY  = 26;
+
+const ZONE_X     = LOG_CX + LOG_W/2 + 20;
 const ZONE_RIGHT = CW - 30;
-const ZONE_W = (ZONE_RIGHT - ZONE_X) / 3;
+const ZONE_W     = (ZONE_RIGHT - ZONE_X) / 3;
 const ZONE_TOP_Y = LOG_TOP + LOG_RY;
 const ZONE_BOT_Y = LOG_BOT - LOG_RY;
-const ZONE_H = ZONE_BOT_Y - ZONE_TOP_Y;
-const DRAG_MAX = 120; const GRAVITY = 900; const DT = 0.004;
-const TEAM_COLOR = ["#1d4ed8","#b45309"];
-const TEAM_NAME = ["チームA","チームB"];
+const ZONE_H     = ZONE_BOT_Y - ZONE_TOP_Y;
+
 const ZONE_DEFS = [
-    { label:"1pt", pts:1, color:"#fde047", tc:"#713f12" },
-    { label:"2pt", pts:2, color:"#fb923c", tc:"#7c2d12" },
-    { label:"3pt", pts:3, color:"#f87171", tc:"#7f1d1d" }
+  { label:"1pt", pts:1, color:"##ffc72c", tc:"#713f12" },
+  { label:"2pt", pts:2, color:"#012169", tc:"#7c2d12" },
+  { label:"3pt", pts:3, color:"#f87171", tc:"#7f1d1d" },
 ];
 
-let g = {};
-let drag = null;
-let anim = null;
-let throwing = false;
+const LOG_HIT_X = LOG_CX - LOG_W/2;
+const DRAG_MAX  = 120;
+const GRAVITY   = 900;
+const DT        = 0.004;
 
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
+const TEAM_COLOR = ["#1d4ed8","#b45309"];
+const TEAM_BG    = ["#dbeafe","#fef3c7"];
+const TEAM_NAME_PVP = ["チームA","チームB"];
+const TEAM_NAME_AI  = ["あなた","AI"];
 
-function initGame() {
-    g = {
-        round: 1, phase: "throwing", turn: 0, playerIdx: 0,
-        scores: [Array(ROUNDS_MAX).fill(0), Array(ROUNDS_MAX).fill(0)],
-        roundMarkers: [], log: [], maxRounds: ROUNDS_MAX
-    };
-    updateUI();
-    draw();
+function playerY(idx) { 
+  return FIELD_MID; 
 }
-
-function playerY(idx) { return FIELD_MID + (idx - 1) * PLAYER_SPACING; }
 
 function dragToVelocity(dx, dy) {
-    const len = Math.sqrt(dx*dx + dy*dy);
-    const power = Math.min(len / DRAG_MAX, 1.0);
-    const minVx = (LOG_CX - LOG_W/2 - THROW_X) / (80 * DT);
-    const speed = minVx / 0.1 * power;
-    return { vx: -dx/len*speed, vy: -dy/len*speed, power };
+  const len = Math.sqrt(dx*dx+dy*dy);
+  if(len < 0.1) return {vx: 0, vy: 0, power: 0};
+  const power = Math.min(len/DRAG_MAX, 1.0);
+  const minVx = (LOG_HIT_X - THROW_X)/(80*DT);
+  const speed  = minVx/0.1*power * 0.95;
+  return { vx:-dx/len*speed, vy:-dy/len*speed, power };
 }
 
-function simTraj(x0, y0, vx0, vy0, steps=140) {
-    const pts = [];
-    let x=x0, y=y0, vx=vx0, vy=vy0;
-    for (let i=0; i<steps; i++) {
-        pts.push({x,y,vx,vy});
-        vy += GRAVITY * DT; x += vx * DT; y += vy * DT;
-        if (x > CW+60 || x < -60 || y > CH+60) break;
-    }
-    return pts;
+function simTraj(x0,y0,vx0,vy0,steps=140) {
+  const pts=[];
+  let x=x0,y=y0,vx=vx0,vy=vy0;
+  for(let i=0;i<steps;i++){
+    pts.push({x,y,vx,vy});
+    vy+=GRAVITY*DT; x+=vx*DT; y+=vy*DT;
+    if(x>CW+60||x<-60||y>CH+60) break;
+  }
+  return pts;
 }
 
 function checkLog(pts) {
-    const left = LOG_CX - LOG_W/2;
-    for (let i=0; i<pts.length-1; i++) {
-        const p=pts[i], q=pts[i+1];
-        if (p.x <= left && q.x >= left) {
-            const t = (left - p.x) / ((q.x-p.x)||0.001);
-            const hy = p.y + t*(q.y-p.y);
-            if (hy >= LOG_TOP && hy <= LOG_BOT) {
-                return { hit:true, hx:left, hy, idx:i, vx: p.vx+(q.vx-p.vx)*t, vy: p.vy+(q.vy-p.vy)*t };
-            }
-        }
+  const left=LOG_HIT_X, right=LOG_CX+LOG_W/2;
+  for(let i=0;i<pts.length-1;i++){
+    const p=pts[i],q=pts[i+1];
+    if(p.x<=left&&q.x>=left){
+      const t=(left-p.x)/((q.x-p.x)||0.001);
+      const hy=p.y+t*(q.y-p.y);
+      if(hy>=LOG_TOP&&hy<=LOG_BOT)
+        return{hit:true,hx:left,hy,idx:i,vx:p.vx+(q.vx-p.vx)*t,vy:p.vy+(q.vy-p.vy)*t};
     }
-    return { hit:false };
+  }
+  return{hit:false};
 }
 
-function bounceFromLog(hx, hy, inVx, inVy) {
-    const angle = Math.atan2(Math.abs(inVy), Math.abs(inVx));
-    const goRight = angle < Math.PI / 3.5;
-    const speed = Math.sqrt(inVx*inVx + inVy*inVy);
-    const reducedSpeed = speed * (0.2 + Math.random()*0.15);
-    const bvx = goRight ? reducedSpeed * (0.6 + Math.random()*0.3) : -reducedSpeed * (0.5 + Math.random()*0.3);
-    const bvy = -reducedSpeed * (0.3 + Math.random()*0.4);
-    const floorY = FIELD_BOT - 10;
-    const pts = [];
-    let x = hx + (bvx > 0 ? 3 : -3), y = hy, vx = bvx, vy = bvy;
-    for (let i=0; i<200; i++) {
-        pts.push({x, y, vx, vy});
-        vy += GRAVITY * DT; x += vx * DT; y += vy * DT;
-        if (y >= floorY) {
-            y = floorY; vy = -vy * 0.35; vx = vx * 0.6;
-            if (Math.abs(vy) < 30 && Math.abs(vx) < 20) { pts.push({x, y:floorY, vx:0, vy:0}); break; }
-        }
-        if (x > CW+60 || x < -60) break;
+function bounceFromLog(hx,hy,inVx,inVy) {
+  const angle=Math.atan2(Math.abs(inVy),Math.abs(inVx));
+  const goRight=angle<Math.PI/3.5;
+  const speed=Math.sqrt(inVx*inVx+inVy*inVy);
+  const reducedSpeed=speed*(0.2+Math.random()*0.15);
+  const bvx=goRight? reducedSpeed*(0.6+Math.random()*0.3):-reducedSpeed*(0.5+Math.random()*0.3);
+  const bvy=-reducedSpeed*(0.3+Math.random()*0.4);
+  const floorY=FIELD_BOT-10;
+  const pts=[];
+  let x=hx+(bvx>0?3:-3),y=hy,vx=bvx,vy=bvy;
+  for(let i=0;i<200;i++){
+    pts.push({x,y,vx,vy});
+    vy+=GRAVITY*DT; x+=vx*DT; y+=vy*DT;
+    if(y>=floorY){
+      y=floorY; vy=-vy*0.35; vx=vx*0.6;
+      if(Math.abs(vy)<30&&Math.abs(vx)<20){pts.push({x,y:floorY,vx:0,vy:0});break;}
     }
-    return pts;
+    if(x>CW+60||x<-60) break;
+  }
+  return pts;
 }
 
 function judgeLanding(pts) {
-    const last = pts[pts.length-1];
-    if (last.y < ZONE_TOP_Y || last.y > ZONE_BOT_Y) return { inZone:false };
-    for (let i=0; i<ZONE_DEFS.length; i++) {
-        const zx = ZONE_X + i*ZONE_W;
-        if (last.x >= zx && last.x <= zx+ZONE_W) return { inZone:true, zone:ZONE_DEFS[i], zoneIdx:i, lx:last.x, ly:last.y };
-    }
-    return { inZone:false };
+  const last=pts[pts.length-1];
+  if(last.y<ZONE_TOP_Y||last.y>ZONE_BOT_Y) return{inZone:false};
+  for(let i=0;i<ZONE_DEFS.length;i++){
+    const zx=ZONE_X+i*ZONE_W;
+    if(last.x>=zx&&last.x<=zx+ZONE_W)
+      return{inZone:true,zone:ZONE_DEFS[i],zoneIdx:i,lx:last.x,ly:last.y};
+  }
+  return{inZone:false};
 }
 
-function draw() {
-    ctx.clearRect(0,0,CW,CH);
-    // フィールド背景
-    ctx.fillStyle="#e8f0e0"; ctx.fillRect(0,0,CW,CH);
-    ctx.fillStyle="#d4c890";
-    ctx.beginPath(); ctx.roundRect(30,FIELD_TOP,CW-60,FIELD_BOT-FIELD_TOP,12); ctx.fill();
-    ctx.strokeStyle="#b0a060"; ctx.lineWidth=2; ctx.stroke();
+function initGame() {
+  return {
+    round:1, phase:"throwing", turn:0, playerIdx:0,
+    scores:[Array(ROUNDS_MAX).fill(0),Array(ROUNDS_MAX).fill(0)],
+    roundMarkers:[], log:[], maxRounds:ROUNDS_MAX,
+  };
+}
 
-    // ゾーン
-    ZONE_DEFS.forEach((z,i)=>{
-        const zx=ZONE_X+i*ZONE_W;
-        ctx.fillStyle=z.color; ctx.fillRect(zx, ZONE_TOP_Y, ZONE_W, ZONE_H);
-        ctx.strokeStyle="#99000055"; ctx.strokeRect(zx, ZONE_TOP_Y, ZONE_W, ZONE_H);
-        ctx.fillStyle=z.tc; ctx.font="bold 14px sans-serif"; ctx.textAlign="center";
-        ctx.fillText(z.label, zx+ZONE_W/2, ZONE_BOT_Y+18);
+function App() {
+  const [mode, setMode] = useState(null);
+  const [aiDiff, setAiDiff] = useState(0.5);
+  const [g, setG] = useState(initGame());
+  const [drag, setDrag] = useState(null);
+  const [anim, setAnim] = useState(null);
+  const [throwing, setThrowing] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+  const canvasRef = useRef(null);
+  const logRef = useRef(null);
+  const animRef = useRef(null);
+  const gRef = useRef(g);
+  const modeRef = useRef(mode);
+  
+  useEffect(() => { gRef.current = g; }, [g]);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => { if(logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [g.log]);
+
+  useEffect(() => {
+    if(mode !== "ai") return;
+    if(g.phase !== "throwing") return;
+    if(g.turn !== 1) return;
+    if(throwing) return;
+    const timer = setTimeout(() => {
+      const ox = THROW_X, oy = playerY(g.playerIdx);
+      
+      // 難易度に応じた狙う高さを決定
+      let targetY, powerPercent;
+      if(aiDiff >= 0.7) {
+        // hard: 丸太上部を狙う（3pt狙い、パワー30%）
+        targetY = LOG_TOP + 10;
+        powerPercent = 0.30;
+      } else if(aiDiff >= 0.4) {
+        // normal: 丸太中央上寄りを狙う（2pt狙い、パワー25%）
+        targetY = LOG_TOP + (LOG_BOT - LOG_TOP) * 0.3;
+        powerPercent = 0.25;
+      } else {
+        // easy: 丸太中央を狙う（パワー15%）
+        targetY = (LOG_TOP + LOG_BOT) / 2;
+        powerPercent = 0.15;
+      }
+      
+      // 目標高さに向かうドラッグを計算
+      const needDy = targetY - oy;
+      
+      // パワー％からドラッグ量を計算（下向きドラッグ）
+      const dx = -DRAG_MAX * powerPercent;
+      const dy = DRAG_MAX * powerPercent * 0.4 + (needDy * 0.1);  // パワーと目標高さを組み合わせ
+      
+      // ノイズを加える（難易度が高いほど減る）
+      const noise = (1 - aiDiff) * 20;
+      const finalDx = dx + (Math.random() - 0.5) * noise;
+      const finalDy = dy + (Math.random() - 0.5) * noise * 0.2;
+      
+      const {vx, vy} = dragToVelocity(finalDx, finalDy);
+      executeThrow(ox, oy, vx, vy);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [g.turn, g.playerIdx, g.phase, throwing, mode, aiDiff]);
+
+  const executeThrow = (ox, oy, vx, vy) => {
+    const flyPts = simTraj(ox, oy, vx, vy, 140);
+    const col = checkLog(flyPts);
+    let result, fullPts;
+    if(!col.hit) {
+      result = {hitMarutai:false, pts:0, inZone:false};
+      fullPts = flyPts;
+    } else {
+      const prePts = flyPts.slice(0, col.idx+1);
+      const bouncePts = bounceFromLog(col.hx, col.hy, col.vx, col.vy);
+      const landing = judgeLanding(bouncePts);
+      result = landing.inZone
+        ? {hitMarutai:true, pts:landing.zone.pts, lx:landing.lx, ly:landing.ly, zoneIdx:landing.zoneIdx, zone:landing.zone, inZone:true}
+        : {hitMarutai:true, pts:0, inZone:false};
+      fullPts = [...prePts, ...bouncePts];
+    }
+    setLastResult(result);
+    setThrowing(true);
+    let idx = 0;
+    setAnim({pts:fullPts, idx});
+    const tick = () => {
+      idx += 3;
+      if(idx >= fullPts.length) {
+        setAnim(null);
+        finishThrow(result);
+        return;
+      }
+      setAnim(a => ({...a, idx}));
+      animRef.current = requestAnimationFrame(tick);
+    };
+    animRef.current = requestAnimationFrame(tick);
+  };
+
+  const finishThrow = (result) => {
+    setG(prev => {
+      const team = prev.turn, player = prev.playerIdx;
+      const TEAM_NAME = mode === "ai" ? TEAM_NAME_AI : TEAM_NAME_PVP;
+      const logLine = result.hitMarutai
+        ? (result.inZone ? `R${prev.round} ${TEAM_NAME[team]} P${player+1}: 丸太命中 → ${result.pts}点`
+                         : `R${prev.round} ${TEAM_NAME[team]} P${player+1}: 丸太命中 → ゾーン外`)
+        : `R${prev.round} ${TEAM_NAME[team]} P${player+1}: 外れ`;
+      const newMarker = result.inZone ? {team, pts:result.pts, lx:result.lx, ly:result.ly, zoneIdx:result.zoneIdx} : null;
+      const newRM = newMarker ? [...prev.roundMarkers, newMarker] : prev.roundMarkers;
+      let nt = team, np = player, nph = prev.phase, ns = prev.scores.map(s => [...s]), nmax = prev.maxRounds, xlog = null;
+      
+      if(team === 0 && player < PLAYERS-1) { np = player + 1; }
+      else if(team === 0) { nt = 1; np = 0; }
+      else if(team === 1 && player < PLAYERS-1) { np = player + 1; }
+      else {
+        const aS = newRM.filter(m => m.team === 0).reduce((s, m) => s + m.pts, 0);
+        const bS = newRM.filter(m => m.team === 1).reduce((s, m) => s + m.pts, 0);
+        ns[0][prev.round-1] = aS;
+        ns[1][prev.round-1] = bS;
+        const tA = ns[0].reduce((a, b) => a + b, 0), tB = ns[1].reduce((a, b) => a + b, 0);
+        xlog = `── R${prev.round}終了  A:${aS}点 / B:${bS}点 ──`;
+        if(prev.round >= prev.maxRounds) {
+          if(tA !== tB) nph = "gameEnd";
+          else { nmax++; xlog += " 同点！延長"; }
+        } else nph = "roundEnd";
+        return {...prev, round:prev.round+1, phase:nph, turn:0, playerIdx:0, scores:ns, roundMarkers:[], maxRounds:nmax, log:[...prev.log, logLine, xlog].filter(Boolean)};
+      }
+      return {...prev, turn:nt, playerIdx:np, roundMarkers:newRM, log:[...prev.log, logLine]};
+    });
+    setThrowing(false);
+  };
+
+  useEffect(() => {
+    const cvs = canvasRef.current;
+    if(!cvs) return;
+    const ctx = cvs.getContext("2d");
+    ctx.clearRect(0, 0, CW, CH);
+    ctx.fillStyle = "#e8f0e0";
+    ctx.fillRect(0, 0, CW, CH);
+    ctx.fillStyle = "#d4c890";
+    ctx.beginPath();
+    ctx.roundRect(30, FIELD_TOP, CW-60, FIELD_BOT-FIELD_TOP, 12);
+    ctx.fill();
+    ctx.strokeStyle = "#b0a060";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ZONE_DEFS.forEach((z, i) => {
+      const zx = ZONE_X + i * ZONE_W;
+      ctx.fillStyle = z.color;
+      ctx.fillRect(zx, ZONE_TOP_Y, ZONE_W, ZONE_H);
+      ctx.strokeStyle = "#99000055";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(zx, ZONE_TOP_Y, ZONE_W, ZONE_H);
+      ctx.fillStyle = z.tc;
+      ctx.font = "bold 14px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(z.label, zx + ZONE_W/2, ZONE_BOT_Y + 18);
     });
 
-    // --- 丸太の描画（年輪・幹を復活） ---
-    const logLeft = LOG_CX - LOG_W/2; const logRight = LOG_CX + LOG_W/2;
-    const rxRef = LOG_W/2; const ryRef = LOG_RY * 0.6;
+    const logLeft = LOG_CX - LOG_W/2, logRight = LOG_CX + LOG_W/2;
+    const rxRef = LOG_W/2, ryRef = LOG_RY * 0.6;
     ctx.save();
-    const logGrad=ctx.createLinearGradient(logLeft,0,logRight,0);
-    logGrad.addColorStop(0,"#3d1a06"); logGrad.addColorStop(0.2,"#5a2d0c"); logGrad.addColorStop(0.5,"#8b4513"); logGrad.addColorStop(0.8,"#a0522d"); logGrad.addColorStop(1,"#5a2d0c");
-    ctx.fillStyle=logGrad;
+    const logGrad = ctx.createLinearGradient(logLeft, 0, logRight, 0);
+    logGrad.addColorStop(0, "#3d1a06");
+    logGrad.addColorStop(0.2, "#5a2d0c");
+    logGrad.addColorStop(0.5, "#8b4513");
+    logGrad.addColorStop(0.8, "#a0522d");
+    logGrad.addColorStop(1, "#5a2d0c");
+    ctx.fillStyle = logGrad;
     ctx.beginPath();
-    ctx.moveTo(logLeft, LOG_TOP+LOG_RY); ctx.lineTo(logLeft, LOG_BOT-LOG_RY);
-    ctx.ellipse(LOG_CX, LOG_BOT-LOG_RY, rxRef, ryRef, 0, Math.PI, 0, true);
-    ctx.lineTo(logRight, LOG_TOP+LOG_RY);
-    ctx.ellipse(LOG_CX, LOG_TOP+LOG_RY, rxRef, ryRef, 0, 0, Math.PI, false);
-    ctx.closePath(); ctx.fill();
-    
-    // 上端の断面と年輪
-    const endGrad=ctx.createRadialGradient(LOG_CX,LOG_TOP+LOG_RY,0,LOG_CX,LOG_TOP+LOG_RY,rxRef);
-    endGrad.addColorStop(0,"#d2b48c"); endGrad.addColorStop(1,"#5a2d0c");
-    ctx.beginPath(); ctx.ellipse(LOG_CX,LOG_TOP+LOG_RY,rxRef,ryRef,0,0,Math.PI*2);
-    ctx.fillStyle=endGrad; ctx.fill();
-    ctx.strokeStyle="#2d0e00"; ctx.lineWidth=1.5; ctx.stroke();
-    ctx.strokeStyle="#5a300844";
-    for(let r=0.2; r<0.9; r+=0.15){
-        ctx.beginPath(); ctx.ellipse(LOG_CX,LOG_TOP+LOG_RY,rxRef*r,ryRef*r,0,0,Math.PI*2); ctx.stroke();
+    ctx.moveTo(logLeft, LOG_TOP + LOG_RY);
+    ctx.lineTo(logLeft, LOG_BOT - LOG_RY);
+    ctx.ellipse(LOG_CX, LOG_BOT - LOG_RY, rxRef, ryRef, 0, Math.PI, 0, true);
+    ctx.lineTo(logRight, LOG_TOP + LOG_RY);
+    ctx.ellipse(LOG_CX, LOG_TOP + LOG_RY, rxRef, ryRef, 0, 0, Math.PI, false);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "#2d0e00";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(logLeft, LOG_TOP + LOG_RY);
+    ctx.lineTo(logLeft, LOG_BOT - LOG_RY);
+    ctx.ellipse(LOG_CX, LOG_BOT - LOG_RY, rxRef, ryRef, 0, Math.PI, 0, true);
+    ctx.lineTo(logRight, LOG_TOP + LOG_RY);
+    ctx.stroke();
+    const endGrad = ctx.createRadialGradient(LOG_CX, LOG_TOP + LOG_RY, 0, LOG_CX, LOG_TOP + LOG_RY, rxRef);
+    endGrad.addColorStop(0, "#d2b48c");
+    endGrad.addColorStop(0.7, "#8b4513");
+    endGrad.addColorStop(1, "#5a2d0c");
+    ctx.beginPath();
+    ctx.ellipse(LOG_CX, LOG_TOP + LOG_RY, rxRef, ryRef, 0, 0, Math.PI*2);
+    ctx.fillStyle = endGrad;
+    ctx.fill();
+    ctx.strokeStyle = "#2d0e00";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.strokeStyle = "#5a300844";
+    ctx.lineWidth = 1;
+    for(let r = 0.2; r < 0.9; r += 0.15) {
+      ctx.beginPath();
+      ctx.ellipse(LOG_CX, LOG_TOP + LOG_RY, rxRef*r, ryRef*r, 0, 0, Math.PI*2);
+      ctx.stroke();
     }
     ctx.restore();
 
-    // マーカー
-    g.roundMarkers.forEach((m,i)=>{
-        const zx=ZONE_X+m.zoneIdx*ZONE_W;
-        const mx=zx+ZONE_W/2+(i%2===0?-10:10);
-        ctx.beginPath(); ctx.arc(mx,m.ly,9,0,Math.PI*2);
-        ctx.fillStyle=TEAM_COLOR[m.team]; ctx.fill();
-        ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke();
+    g.roundMarkers.forEach((m, i) => {
+      const zx = ZONE_X + m.zoneIdx * ZONE_W;
+      const mx = zx + ZONE_W/2 + (i%2 === 0 ? -10 : 10);
+      ctx.beginPath();
+      ctx.arc(mx, m.ly, 9, 0, Math.PI*2);
+      ctx.fillStyle = TEAM_COLOR[m.team];
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 9px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(m.pts, mx, m.ly + 3);
     });
 
-    if(anim){
-        const p = anim.pts[anim.idx];
-        const p2 = anim.pts[Math.min(anim.idx+1, anim.pts.length-1)];
-        const angle = Math.atan2(p2.y-p.y, p2.x-p.x);
-        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(angle);
-        ctx.fillStyle="#5D4037"; ctx.fillRect(-22,-4,44,8);
-        ctx.restore();
+    if(anim && anim.idx < anim.pts.length) {
+      const p = anim.pts[anim.idx], p2 = anim.pts[Math.min(anim.idx+1, anim.pts.length-1)];
+      const angle = Math.atan2(p2.y - p.y, p2.x - p.x);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(angle);
+      ctx.fillStyle = "#5D4037";
+      ctx.fillRect(-22, -4, 44, 8);
+      ctx.restore();
     }
 
-    if(drag && !throwing){
-        const {ox,oy,cx,cy}=drag;
-        const ddx=cx-ox, ddy=cy-oy;
-        const len=Math.sqrt(ddx*ddx+ddy*ddy);
-        if(len>4){
-            const {vx,vy}=dragToVelocity(ddx,ddy);
-            const pts=simTraj(ox,oy,vx,vy);
-            ctx.strokeStyle=TEAM_COLOR[g.turn]+"bb"; ctx.lineWidth=2; ctx.setLineDash([7,5]);
-            ctx.beginPath();
-            pts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));
-            ctx.stroke(); ctx.setLineDash([]);
+    if(drag && !throwing) {
+      const {ox, oy, cx, cy} = drag;
+      const ddx = cx - ox, ddy = cy - oy, len = Math.sqrt(ddx*ddx + ddy*ddy);
+      if(len > 4) {
+        const clamp = Math.min(len, DRAG_MAX);
+        const ex = ox + ddx/len * clamp, ey = oy + ddy/len * clamp;
+        ctx.strokeStyle = "#555";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(ox, oy);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const {vx, vy} = dragToVelocity(ddx, ddy);
+        const pts = simTraj(ox, oy, vx, vy);
+        ctx.strokeStyle = TEAM_COLOR[g.turn] + "bb";
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([7, 5]);
+        ctx.beginPath();
+        pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const col = checkLog(pts);
+        if(col.hit) {
+          ctx.beginPath();
+          ctx.arc(col.hx, col.hy, 7, 0, Math.PI*2);
+          ctx.fillStyle = "#22c55ecc";
+          ctx.fill();
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 2;
+          ctx.stroke();
         }
+        const pct = clamp / DRAG_MAX;
+        ctx.fillStyle = "#0003";
+        ctx.fillRect(10, CH - 28, CW - 20, 12);
+        ctx.fillStyle = `hsl(${120 - pct*120}, 75%, 45%)`;
+        ctx.fillRect(10, CH - 28, (CW - 20)*pct, 12);
+        ctx.strokeStyle = "#888";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(10, CH - 28, CW - 20, 12);
+        ctx.fillStyle = "#222";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(`パワー ${Math.round(pct*100)}%`, 12, CH - 32);
+      }
     }
 
-    if(g.phase==="throwing" && !throwing){
-        [0,1,2].forEach(i=>{
-            const py=playerY(i);
-            const isActive=i===g.playerIdx;
-            ctx.beginPath(); ctx.arc(THROW_X, py, isActive?20:14, 0, Math.PI*2);
-            ctx.fillStyle=isActive?TEAM_COLOR[g.turn]+"55":"#ccc4"; ctx.fill();
-            ctx.strokeStyle=isActive?TEAM_COLOR[g.turn]:"#bbb"; ctx.stroke();
-            ctx.fillStyle=isActive?TEAM_COLOR[g.turn]:"#888"; ctx.font="10px sans-serif";
-            ctx.textAlign="center"; ctx.fillText(`P${i+1}`, THROW_X, py+4);
-        });
+    if(g.phase === "throwing" && !throwing) {
+      [0, 1, 2].forEach(i => {
+        const py = playerY(i), isActive = i === gRef.current.playerIdx;
+        const isAI = mode === "ai" && gRef.current.turn === 1;
+        const r = isActive ? 20 : 14;
+        ctx.beginPath();
+        ctx.ellipse(THROW_X, py + r*0.4, r*0.8, r*0.3, 0, 0, Math.PI*2);
+        ctx.fillStyle = "#0002";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(THROW_X, py, r, 0, Math.PI*2);
+        ctx.fillStyle = isActive ? TEAM_COLOR[g.turn] + "55" : "#ccc4";
+        ctx.fill();
+        ctx.strokeStyle = isActive ? TEAM_COLOR[g.turn] : "#bbb";
+        ctx.lineWidth = isActive ? 2.5 : 1.5;
+        ctx.setLineDash(isActive && !drag && !isAI ? [4, 3] : []);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = isActive ? TEAM_COLOR[g.turn] : "#888";
+        ctx.font = `${isActive ? "bold " : ""}${isActive ? 12 : 10}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.fillText(isAI && isActive ? "AI" : `P${i+1}`, THROW_X, py + 4);
+      });
+      if(!drag && !(mode === "ai" && g.turn === 1)) {
+        ctx.fillStyle = TEAM_COLOR[g.turn] + "cc";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("← 引いて離す", THROW_X, playerY(2) + 40);
+      }
+      if(mode === "ai" && g.turn === 1 && !throwing) {
+        ctx.fillStyle = TEAM_COLOR[1] + "cc";
+        ctx.font = "bold 11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("AI 思考中...", THROW_X, playerY(2) + 40);
+      }
     }
-}
+  }, [g, drag, throwing, anim, mode]);
 
-function updateUI() {
-    const total = t => g.scores[t].reduce((a,b)=>a+b,0);
-    document.getElementById("score-a").innerHTML = `${total(0)}<span>点</span>`;
-    document.getElementById("score-b").innerHTML = `${total(1)}<span>点</span>`;
-    document.getElementById("rounds-a").innerText = g.scores[0].map((s,i)=>`R${i+1}:${s}`).join(" ");
-    document.getElementById("rounds-b").innerText = g.scores[1].map((s,i)=>`R${i+1}:${s}`).join(" ");
-
-    const statusEl = document.getElementById("status");
-    if(g.phase==="throwing") statusEl.innerHTML = `R${g.round} — <span style="color:${TEAM_COLOR[g.turn]}; font-weight:bold">${TEAM_NAME[g.turn]} P${g.playerIdx+1} の番</span>`;
-    else if(g.phase==="roundEnd") statusEl.innerHTML = `<span style="color:#f59e0b">ラウンド終了 — 交代</span>`;
-    else statusEl.innerHTML = `<span style="color:#f87171; font-weight:bold">ゲーム終了</span>`;
-
-    const overlay = document.getElementById("overlay");
-    overlay.style.display = (g.phase==="roundEnd" || g.phase==="gameEnd") ? "flex" : "none";
-    if(g.phase==="roundEnd") overlay.innerHTML = `<button class="btn btn-next" onclick="nextRound()">次のラウンドへ ▶</button>`;
-    if(g.phase==="gameEnd") {
-        const winText = total(0)>total(1)? "チームAの勝利！" : total(1)>total(0)? "チームBの勝利！" : "引き分け";
-        overlay.innerHTML = `<div style="font-size:22px; color:#fbbf24; margin-bottom:10px">${winText}</div><button class="btn btn-restart" onclick="initGame()">もう一度</button>`;
-    }
-}
-
-function addLog(msg, color) {
-    const logArea = document.getElementById("log");
-    const div = document.createElement("div"); div.style.color = color; div.innerText = msg;
-    logArea.appendChild(div); logArea.scrollTop = logArea.scrollHeight;
-}
-
-canvas.addEventListener("mousedown", onDown);
-window.addEventListener("mousemove", onMove);
-window.addEventListener("mouseup", onUp);
-canvas.addEventListener("touchstart", onDown, {passive:false});
-window.addEventListener("touchmove", onMove, {passive:false});
-window.addEventListener("touchend", onUp);
-
-function getPos(e) {
-    const rect = canvas.getBoundingClientRect();
-    const sx = CW/rect.width, sy = CH/rect.height;
+  const getPos = (e) => {
+    const cvs = canvasRef.current, rect = cvs.getBoundingClientRect();
+    const sx = CW / rect.width, sy = CH / rect.height;
     const src = e.touches ? e.touches[0] : e;
-    return { x: (src.clientX - rect.left)*sx, y: (src.clientY - rect.top)*sy };
-}
+    return {x:(src.clientX - rect.left)*sx, y:(src.clientY - rect.top)*sy};
+  };
+  const activePY = () => playerY(gRef.current.playerIdx);
 
-function onDown(e) {
-    if(throwing || g.phase!=="throwing") return;
-    const {x,y} = getPos(e);
-    if(Math.sqrt((x-THROW_X)**2 + (y-playerY(g.playerIdx))**2) > 40) return;
-    drag = { ox: THROW_X, oy: playerY(g.playerIdx), cx: x, cy: y };
-    if(e.cancelable) e.preventDefault();
-}
+  const onDown = useCallback((e) => {
+    if(throwing || gRef.current.phase !== "throwing") return;
+    if(modeRef.current === "ai" && gRef.current.turn === 1) return;
+    e.preventDefault();
+    const {x, y} = getPos(e);
+    if(Math.sqrt((x - THROW_X)**2 + (y - activePY())**2) > 34) return;
+    setDrag({ox:THROW_X, oy:activePY(), cx:x, cy:y});
+  }, [throwing]);
 
-function onMove(e) {
+  const onMove = useCallback((e) => {
     if(!drag) return;
-    const {x,y} = getPos(e); drag.cx = x; drag.cy = y;
-    draw(); if(e.cancelable) e.preventDefault();
-}
+    e.preventDefault();
+    const {x, y} = getPos(e);
+    setDrag(d => ({...d, cx:x, cy:y}));
+  }, [drag]);
 
-function onUp(e) {
+  const onUp = useCallback((e) => {
     if(!drag || throwing) return;
-    const {ox,oy,cx,cy} = drag; drag = null;
-    const {vx,vy,power} = dragToVelocity(cx-ox, cy-oy);
-    if(power < 0.05) { draw(); return; }
+    e.preventDefault();
+    const {ox, oy, cx, cy} = drag;
+    setDrag(null);
+    const dx = cx - ox, dy = cy - oy, len = Math.sqrt(dx*dx + dy*dy);
+    if(len < 6) return;
+    const {vx, vy, power} = dragToVelocity(dx, dy);
+    if(power < 0.05) return;
+    executeThrow(ox, oy, vx, vy);
+  }, [drag, throwing]);
 
-    throwing = true;
-    const flyPts = simTraj(ox,oy,vx,vy,140);
-    const col = checkLog(flyPts);
-    let result, fullPts;
-    if(!col.hit) { result = { hitMarutai:false }; fullPts = flyPts; }
-    else {
-        const bouncePts = bounceFromLog(col.hx, col.hy, col.vx, col.vy);
-        const landing = judgeLanding(bouncePts);
-        result = landing.inZone ? { hitMarutai:true, pts:landing.zone.pts, ly:landing.lx, ly:landing.ly, zoneIdx:landing.zoneIdx, inZone:true } : { hitMarutai:true, inZone:false };
-        fullPts = [...flyPts.slice(0, col.idx+1), ...bouncePts];
-    }
+  useEffect(() => () => cancelAnimationFrame(animRef.current), []);
 
-    let idx = 0;
-    function tick() {
-        idx += 2;
-        if(idx >= fullPts.length) { anim = null; finishThrow(result); return; }
-        anim = { pts: fullPts, idx }; draw(); requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
+  const TEAM_NAME = mode === "ai" ? TEAM_NAME_AI : TEAM_NAME_PVP;
+  const total = (t) => g.scores[t].reduce((a, b) => a + b, 0);
+  const winner = () => {
+    const a = total(0), b = total(1);
+    return a > b ? `${TEAM_NAME[0]} の勝利！` : b > a ? `${TEAM_NAME[1]} の勝利！` : "引き分け";
+  };
+
+  const startGame = (m) => { setMode(m); setG(initGame()); setLastResult(null); };
+
+  if(!mode) return (
+    <div style={{fontFamily:"'Hiragino Sans','Meiryo',sans-serif",background:"#95ff83",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+      <h2 style={{color:"#e0e0e0",letterSpacing:3,fontSize:28,margin:0}}>クルドゥガ</h2>
+      <p style={{color:"#666",fontSize:12,margin:0}}>日本ナウル協会 公式ルール準拠</p>
+      <div style={{display:"flex",gap:16,marginTop:16}}>
+        <button onClick={() => startGame("pvp")}
+          style={{padding:"18px 36px",background:"#1d4ed8",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #1d4ed844"}}>
+          対戦
+        </button>
+        <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
+          <button onClick={() => startGame("ai")}
+            style={{padding:"18px 36px",background:"#b45309",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #b4530944"}}>
+            AI対戦
+          </button>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{color:"#aaa",fontSize:11}}>易</span>
+            <input type="range" min="0" max="1" step="0.1" value={aiDiff}
+              onChange={(e) => setAiDiff(parseFloat(e.target.value))}
+              style={{width:100,accentColor:"#f59e0b"}}/>
+            <span style={{color:"#aaa",fontSize:11}}>難</span>
+            <span style={{color:"#f59e0b",fontSize:11,fontWeight:"bold"}}>{aiDiff<=0.3?"かんたん":aiDiff<=0.6?"ふつう":"むずかしい"}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{fontFamily:"'Hiragino Sans','Meiryo',sans-serif",background:"#95ff83",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",padding:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
+        <h2 style={{color:"#e0e0e0",margin:0,letterSpacing:2}}>クルドゥガ</h2>
+        {mode==="ai"&&<span style={{background:"#b45309",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>AI対戦</span>}
+        {mode==="pvp"&&<span style={{background:"#1d4ed8",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>対戦</span>}
+        <button onClick={() => {setMode(null);setG(initGame());}} style={{padding:"3px 10px",background:"#333",color:"#aaa",border:"none",borderRadius:6,fontSize:11,cursor:"pointer"}}>メニュー</button>
+      </div>
+
+      <div style={{display:"flex",gap:10,marginBottom:8,width:"100%",maxWidth:CW}}>
+        {[0,1].map(t => (
+          <div key={t} style={{flex:1,background:TEAM_BG[t],borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
+            <div style={{fontWeight:"bold",color:TEAM_COLOR[t],fontSize:12}}>
+              {TEAM_NAME[t]}{mode==="ai"&&t===1&&<span style={{fontSize:10,marginLeft:4}}>AI</span>}
+            </div>
+            <div style={{fontSize:22,fontWeight:"bold",color:TEAM_COLOR[t]}}>{total(t)}<span style={{fontSize:11}}>点</span></div>
+            <div style={{fontSize:10,color:"#666"}}>
+              {Array.from({length:g.maxRounds}, (_,i) => (
+                <span key={i} style={{marginRight:4,color:i<g.round-1?TEAM_COLOR[t]:"#bbb"}}>R{i+1}:{g.scores[t][i]??0}</span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{fontSize:12,color:"#aaa",marginBottom:6,textAlign:"center"}}>
+        {g.phase==="throwing"&&<>R{g.round}{g.round>ROUNDS_MAX?"（延長）":""} — <span style={{color:TEAM_COLOR[g.turn],fontWeight:"bold"}}>{TEAM_NAME[g.turn]} P{g.playerIdx+1} の番</span></>}
+        {g.phase==="roundEnd"&&<span style={{color:"#f59e0b"}}>R{g.round-1} 終了 — 陣地交代</span>}
+        {g.phase==="gameEnd"&&<span style={{color:"#f87171",fontWeight:"bold"}}>ゲーム終了</span>}
+      </div>
+
+      <div style={{position:"relative",width:"100%",maxWidth:CW}}>
+        <canvas ref={canvasRef} width={CW} height={CH}
+          style={{display:"block",width:"100%",borderRadius:12,cursor:g.phase==="throwing"&&!throwing&&!(mode==="ai"&&g.turn===1)?"crosshair":"default",touchAction:"none",boxShadow:"0 4px 20px #0009"}}
+          onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+          onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
+        />
+        {lastResult&&!throwing&&g.phase==="throwing"&&(
+          <div style={{position:"absolute",top:8,left:"50%",transform:"translateX(-50%)",
+            background:lastResult.inZone?"#166534ee":lastResult.hitMarutai?"#92400eee":"#7f1d1dee",
+            color:"#fff",borderRadius:8,padding:"5px 18px",fontSize:13,fontWeight:"bold",pointerEvents:"none",whiteSpace:"nowrap"}}>
+            {!lastResult.hitMarutai&&"外れ — 丸太に当たらず"}
+            {lastResult.hitMarutai&&lastResult.inZone&&`丸太命中！ → ${lastResult.pts}点`}
+            {lastResult.hitMarutai&&!lastResult.inZone&&"丸太命中 → ゾーン外 (0点)"}
+          </div>
+        )}
+        {g.phase==="roundEnd"&&(
+          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:"#0007",borderRadius:12}}>
+            <button onClick={() => {setLastResult(null);setG(p => ({...p,phase:"throwing"}));}}
+              style={{padding:"12px 28px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:"bold",cursor:"pointer"}}>
+              次のラウンドへ
+            </button>
+          </div>
+        )}
+        {g.phase==="gameEnd"&&(
+          <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#000b",borderRadius:12}}>
+            <div style={{fontSize:22,fontWeight:"bold",color:"#fbbf24",marginBottom:10}}>{winner()}</div>
+            <div style={{color:"#ccc",fontSize:14,marginBottom:16}}>あなた: {total(0)}点 / {mode==="ai"?"AI":"相手"}: {total(1)}点</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={() => {setLastResult(null);setG(initGame());}}
+                style={{padding:"10px 20px",background:"#f59e0b",color:"#000",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>
+                もう一度
+              </button>
+              <button onClick={() => setMode(null)}
+                style={{padding:"10px 20px",background:"#333",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>
+                メニューへ
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div ref={logRef} style={{width:"100%",maxWidth:CW,marginTop:8,background:"#111",borderRadius:10,padding:"7px 12px",maxHeight:100,overflowY:"auto",fontSize:11,color:"#ccc",lineHeight:1.8}}>
+        <div style={{color:"#444",fontSize:10,marginBottom:2}}>投擲ログ</div>
+        {g.log.map((l, i) => (
+          <div key={i} style={{color:l.includes("──")?"#f59e0b":l.includes("あなた")?"#60a5fa":l.includes("AI")?"#fbbf24":"#ccc"}}>{l}</div>
+        ))}
+      </div>
+    </div>
+  );
 }
-
-function finishThrow(res) {
-    const team = g.turn; const pIdx = g.playerIdx;
-    let logMsg = `R${g.round} ${TEAM_NAME[team]} P${pIdx+1}: ` + (res.hitMarutai ? (res.inZone ? `命中 ${res.pts}点` : "命中 ゾーン外") : "外れ");
-    addLog(logMsg, TEAM_COLOR[team]);
-    if(res.inZone) g.roundMarkers.push({ team, pts:res.pts, ly:res.ly, zoneIdx:res.zoneIdx });
-
-    if(team===0 && pIdx < PLAYERS-1) { g.playerIdx++; }
-    else if(team===0) { g.turn=1; g.playerIdx=0; }
-    else if(team===1 && pIdx < PLAYERS-1) { g.playerIdx++; }
-    else {
-        const aS = g.roundMarkers.filter(m=>m.team===0).reduce((s,m)=>s+m.pts, 0);
-        const bS = g.roundMarkers.filter(m=>m.team===1).reduce((s,m)=>s+m.pts, 0);
-        g.scores[0][g.round-1] = aS; g.scores[1][g.round-1] = bS;
-        if(g.round >= g.maxRounds && aS !== bS) g.phase = "gameEnd";
-        else { g.phase = "roundEnd"; g.round++; }
-    }
-    throwing = false; updateUI(); draw();
-}
-
-function nextRound() { g.phase = "throwing"; g.turn = 0; g.playerIdx = 0; g.roundMarkers = []; updateUI(); draw(); }
-
-initGame();
-</script>
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
 </body>
 </html>
