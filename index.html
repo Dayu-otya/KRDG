@@ -37,9 +37,9 @@ const ZONE_BOT_Y = LOG_BOT - LOG_RY;
 const ZONE_H     = ZONE_BOT_Y - ZONE_TOP_Y;
 
 const ZONE_DEFS = [
-  { label:"1pt", pts:1, color:"##ffc72c", tc:"#713f12" },
-  { label:"2pt", pts:2, color:"#012169", tc:"#7c2d12" },
-  { label:"3pt", pts:3, color:"#f87171", tc:"#7f1d1d" },
+  { label:"1pt", pts:1, color:"#012169", tc:"#713f12" },
+  { label:"2pt", pts:2, color:"#ffc72c", tc:"#7c2d12" },
+  { label:"3pt", pts:3, color:"#012169", tc:"#7f1d1d" },
 ];
 
 const LOG_HIT_X = LOG_CX - LOG_W/2;
@@ -47,7 +47,7 @@ const DRAG_MAX  = 120;
 const GRAVITY   = 900;
 const DT        = 0.004;
 
-const TEAM_COLOR = ["#1d4ed8","#b45309"];
+const TEAM_COLOR = ["#6092ff","#b45309"];
 const TEAM_BG    = ["#dbeafe","#fef3c7"];
 const TEAM_NAME_PVP = ["チームA","チームB"];
 const TEAM_NAME_AI  = ["あなた","AI"];
@@ -492,12 +492,12 @@ function App() {
   const startGame = (m) => { setMode(m); setG(initGame()); setLastResult(null); };
 
   if(!mode) return (
-    <div style={{fontFamily:"'Hiragino Sans','Meiryo',sans-serif",background:"#95ff83",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+    <div style={{fontFamily:"'Hiragino Sans','Meiryo',sans-serif",background:"#344e30",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
       <h2 style={{color:"#e0e0e0",letterSpacing:3,fontSize:28,margin:0}}>クルドゥガ</h2>
       <p style={{color:"#666",fontSize:12,margin:0}}>日本ナウル協会 公式ルール準拠</p>
       <div style={{display:"flex",gap:16,marginTop:16}}>
         <button onClick={() => startGame("pvp")}
-          style={{padding:"18px 36px",background:"#1d4ed8",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #1d4ed844"}}>
+          style={{padding:"18px 36px",background:"#6092ff",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #1d4ed844"}}>
           対戦
         </button>
         <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
@@ -519,11 +519,11 @@ function App() {
   );
 
   return (
-    <div style={{fontFamily:"'Hiragino Sans','Meiryo',sans-serif",background:"#95ff83",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",padding:14}}>
+    <div style={{fontFamily:"'Hiragino Sans','Meiryo',sans-serif",background:"#344e30",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",padding:14}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
         <h2 style={{color:"#e0e0e0",margin:0,letterSpacing:2}}>クルドゥガ</h2>
         {mode==="ai"&&<span style={{background:"#b45309",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>AI対戦</span>}
-        {mode==="pvp"&&<span style={{background:"#1d4ed8",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>対戦</span>}
+        {mode==="pvp"&&<span style={{background:"#6092ff",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>対戦</span>}
         <button onClick={() => {setMode(null);setG(initGame());}} style={{padding:"3px 10px",background:"#333",color:"#aaa",border:"none",borderRadius:6,fontSize:11,cursor:"pointer"}}>メニュー</button>
       </div>
 
