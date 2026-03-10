@@ -11,75 +11,87 @@
   <div id="root"></div>
 
 <script type="text/babel">
-const { useState, useRef, useEffect, useCallback } = React;
+const { useState, useRef, useEffect, useCallback, useReducer, useMemo } = React;
 
 const ROUNDS_MAX = 5;
 const PLAYERS = 3;
 const CW = 760;
 const CH = 420;
 
-const THROW_X = 80;
-const FIELD_TOP = 60;
-const FIELD_BOT = CH - 60;
+const THROW_X = 100;
+const FIELD_TOP = 80;
+const FIELD_BOT = CH - 80;
 const FIELD_MID = (FIELD_TOP + FIELD_BOT) / 2;
 
-const LOG_CX  = 340;
-const LOG_TOP = FIELD_TOP + 30;
-const LOG_BOT = FIELD_BOT - 30;
-const LOG_W   = 52;
-const LOG_RY  = 26;
+const LOG_CX  = 360;
+const LOG_TOP = FIELD_TOP + 20;
+const LOG_BOT = FIELD_BOT - 20;
+const LOG_W   = 65;
+const LOG_RY  = 32;
 
-const ZONE_X     = LOG_CX + LOG_W/2 + 20;
-const ZONE_RIGHT = CW - 30;
+const ZONE_X     = LOG_CX + LOG_W/2 + 15;
+const ZONE_RIGHT = CW - 40;
 const ZONE_W     = (ZONE_RIGHT - ZONE_X) / 3;
-const ZONE_TOP_Y = LOG_TOP + LOG_RY;
-const ZONE_BOT_Y = LOG_BOT - LOG_RY;
+const ZONE_TOP_Y = LOG_TOP + LOG_RY + 2;
+const ZONE_BOT_Y = LOG_BOT - LOG_RY - 2;
 const ZONE_H     = ZONE_BOT_Y - ZONE_TOP_Y;
 
 const ZONE_DEFS = [
-  { label:"1pt", pts:1, color:"#012169", tc:"#713f12" },
-  { label:"2pt", pts:2, color:"#ffc72c", tc:"#7c2d12" },
-  { label:"3pt", pts:3, color:"#012169", tc:"#7f1d1d" },
+  { label:"1pt", pts:1, color:"#012169", tc:"#333" },
+  { label:"2pt", pts:2, color:"#ffc72c", tc:"#333" },
+  { label:"3pt", pts:3, color:"#012169", tc:"#333" },
 ];
 
 const LOG_HIT_X = LOG_CX - LOG_W/2;
-const DRAG_MAX  = 120;
-const GRAVITY   = 900;
-const DT        = 0.004;
 
-const TEAM_COLOR = ["#6092ff","#b45309"];
-const TEAM_BG    = ["#dbeafe","#fef3c7"];
+const PHYSICS = {
+  DRAG_MAX: 120, GRAVITY: 900, DT: 0.004, GRAVITY_PER_FRAME: 3.6,
+  TRAJ_STEPS: 140, BOUNCE_STEPS: 200, BOUNCE_SPEED_RATIO: 0.2,
+  BOUNCE_VY_BASE: -0.35, BOUNCE_VX_BASE_RIGHT: 0.6, BOUNCE_VX_BASE_LEFT: -0.5,
+  ANGLE_THRESHOLD: Math.PI / 3.5, FLOOR_Y_OFFSET: 10, FLOOR_DAMPING: 0.35,
+  FLOOR_FRICTION: 0.6, MIN_VELOCITY_FLOOR: 30, MIN_VELOCITY_FRICTION: 20,
+};
+
+const THROW_PARAMS = {MIN_DRAG_LEN: 6, MIN_POWER: 0.05, THROW_DELAY_AI: 800};
+const AI_DIFFICULTY = {
+  HARD: {targetY:(t,b)=>t+10, powerPercent:0.30, noiseAmount:0.3, usePrediction:true},
+  NORMAL: {targetY:(t,b)=>t+(b-t)*0.3, powerPercent:0.25, noiseAmount:0.6, usePrediction:true},
+  EASY: {targetY:(t,b)=>(t+b)/2, powerPercent:0.15, noiseAmount:1.0, usePrediction:false},
+};
+
+const TEAM_COLOR = ["#00d4ff","#ff6b9d"];
+const TEAM_BG    = ["#e0f7ff","#ffe0f0"];
 const TEAM_NAME_PVP = ["チームA","チームB"];
 const TEAM_NAME_AI  = ["あなた","AI"];
 
-function playerY(idx) { 
-  return FIELD_MID; 
-}
+function playerY(idx) { return FIELD_MID; }
 
 function dragToVelocity(dx, dy) {
   const len = Math.sqrt(dx*dx+dy*dy);
   if(len < 0.1) return {vx: 0, vy: 0, power: 0};
-  const power = Math.min(len/DRAG_MAX, 1.0);
-  const minVx = (LOG_HIT_X - THROW_X)/(80*DT);
-  const speed  = minVx/0.1*power * 0.95;
+  const power = Math.min(len / PHYSICS.DRAG_MAX, 1.0);
+  const minVx = (LOG_HIT_X - THROW_X) / (80 * PHYSICS.DT);
+  const speed  = minVx / 0.1 * power * 0.95;
   return { vx:-dx/len*speed, vy:-dy/len*speed, power };
 }
 
-function simTraj(x0,y0,vx0,vy0,steps=140) {
+function simTraj(x0,y0,vx0,vy0,steps=PHYSICS.TRAJ_STEPS) {
   const pts=[];
   let x=x0,y=y0,vx=vx0,vy=vy0;
   for(let i=0;i<steps;i++){
     pts.push({x,y,vx,vy});
-    vy+=GRAVITY*DT; x+=vx*DT; y+=vy*DT;
+    vy+=PHYSICS.GRAVITY_PER_FRAME; x+=vx*PHYSICS.DT; y+=vy*PHYSICS.DT;
     if(x>CW+60||x<-60||y>CH+60) break;
   }
   return pts;
 }
 
 function checkLog(pts) {
-  const left=LOG_HIT_X, right=LOG_CX+LOG_W/2;
+  if(!pts || pts.length < 2) return{hit:false};
+  const left=LOG_HIT_X;
   for(let i=0;i<pts.length-1;i++){
     const p=pts[i],q=pts[i+1];
+    if(!p || !q) continue;
     if(p.x<=left&&q.x>=left){
       const t=(left-p.x)/((q.x-p.x)||0.001);
       const hy=p.y+t*(q.y-p.y);
@@ -92,26 +104,26 @@ function checkLog(pts) {
 
 function bounceFromLog(hx,hy,inVx,inVy, deterministic=false) {
   const angle=Math.atan2(Math.abs(inVy),Math.abs(inVx));
-  const goRight=angle<Math.PI/3.5;
+  const goRight=angle<PHYSICS.ANGLE_THRESHOLD;
   const speed=Math.sqrt(inVx*inVx+inVy*inVy);
-  const baseReducedSpeed=speed*0.2;
+  const baseReducedSpeed=speed*PHYSICS.BOUNCE_SPEED_RATIO;
   const randOffset=deterministic ? 0.075 : Math.random()*0.15;
   const reducedSpeed=baseReducedSpeed + speed*randOffset;
-  const bvxBase=goRight? 0.6 : -0.5;
+  const bvxBase=goRight? PHYSICS.BOUNCE_VX_BASE_RIGHT : PHYSICS.BOUNCE_VX_BASE_LEFT;
   const bvxRand=deterministic ? 0.15 : Math.random()*0.3;
   const bvx=goRight? reducedSpeed*(bvxBase+bvxRand):-reducedSpeed*(bvxBase+bvxRand);
-  const bvyBase=-0.35;
+  const bvyBase=PHYSICS.BOUNCE_VY_BASE;
   const bvyRand=deterministic ? 0.2 : Math.random()*0.4;
   const bvy=reducedSpeed*(bvyBase-bvyRand);
-  const floorY=FIELD_BOT-10;
+  const floorY=FIELD_BOT-PHYSICS.FLOOR_Y_OFFSET;
   const pts=[];
   let x=hx+(bvx>0?3:-3),y=hy,vx=bvx,vy=bvy;
-  for(let i=0;i<200;i++){
+  for(let i=0;i<PHYSICS.BOUNCE_STEPS;i++){
     pts.push({x,y,vx,vy});
-    vy+=GRAVITY*DT; x+=vx*DT; y+=vy*DT;
+    vy+=PHYSICS.GRAVITY_PER_FRAME; x+=vx*PHYSICS.DT; y+=vy*PHYSICS.DT;
     if(y>=floorY){
-      y=floorY; vy=-vy*0.35; vx=vx*0.6;
-      if(Math.abs(vy)<30&&Math.abs(vx)<20){pts.push({x,y:floorY,vx:0,vy:0});break;}
+      y=floorY; vy=-vy*PHYSICS.FLOOR_DAMPING; vx=vx*PHYSICS.FLOOR_FRICTION;
+      if(Math.abs(vy)<PHYSICS.MIN_VELOCITY_FLOOR&&Math.abs(vx)<PHYSICS.MIN_VELOCITY_FRICTION){pts.push({x,y:floorY,vx:0,vy:0});break;}
     }
     if(x>CW+60||x<-60) break;
   }
@@ -119,8 +131,9 @@ function bounceFromLog(hx,hy,inVx,inVy, deterministic=false) {
 }
 
 function judgeLanding(pts) {
+  if(!pts || pts.length === 0) return{inZone:false};
   const last=pts[pts.length-1];
-  if(last.y<ZONE_TOP_Y||last.y>ZONE_BOT_Y) return{inZone:false};
+  if(!last || last.y<ZONE_TOP_Y||last.y>ZONE_BOT_Y) return{inZone:false};
   for(let i=0;i<ZONE_DEFS.length;i++){
     const zx=ZONE_X+i*ZONE_W;
     if(last.x>=zx&&last.x<=zx+ZONE_W)
@@ -129,92 +142,603 @@ function judgeLanding(pts) {
   return{inZone:false};
 }
 
-function initGame(gameMode = "normal", maxStreakOverride = 0) {
+function predictAIThrow(targetY, powerPercent) {
+  const ox = THROW_X, oy = playerY(0);
+  const needDy = targetY - oy;
+  const dx = -PHYSICS.DRAG_MAX * powerPercent;
+  const dy = PHYSICS.DRAG_MAX * powerPercent * 0.4 + (needDy * 0.1);
+  const {vx, vy} = dragToVelocity(dx, dy);
+  const flyPts = simTraj(ox, oy, vx, vy, 140);
+  const col = checkLog(flyPts);
+  if(!col.hit) return { adjustedTargetY: (LOG_TOP + LOG_BOT) / 2, confidence: 0.3 };
+  const bouncePts = bounceFromLog(col.hx, col.hy, col.vx, col.vy, true);
+  const landing = judgeLanding(bouncePts);
+  if(landing.inZone) return { adjustedTargetY: targetY, confidence: 0.9 };
+  const lastY = bouncePts[bouncePts.length - 1].y;
+  if(lastY > ZONE_BOT_Y) {
+    return { adjustedTargetY: Math.max(LOG_TOP, targetY - 15), confidence: 0.6 };
+  } else {
+    return { adjustedTargetY: Math.min(LOG_BOT, targetY + 15), confidence: 0.6 };
+  }
+}
+
+function playSound(type) {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioContext.currentTime;
+    if(type === "hit") {
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.connect(gain); gain.connect(audioContext.destination);
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+      osc.start(now); osc.stop(now + 0.1);
+    } else if(type === "zone") {
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.connect(gain); gain.connect(audioContext.destination);
+      osc.frequency.setValueAtTime(1000, now);
+      osc.frequency.exponentialRampToValueAtTime(1200, now + 0.15);
+      gain.gain.setValueAtTime(0.4, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      osc.start(now); osc.stop(now + 0.15);
+    } else if(type === "miss") {
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.connect(gain); gain.connect(audioContext.destination);
+      osc.frequency.setValueAtTime(300, now);
+      osc.frequency.exponentialRampToValueAtTime(200, now + 0.2);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+      osc.start(now); osc.stop(now + 0.2);
+    } else if(type === "gameEnd") {
+      const audioContext2 = new (window.AudioContext || window.webkitAudioContext)();
+      const now2 = audioContext2.currentTime;
+      for(let i = 0; i < 3; i++) {
+        const osc = audioContext2.createOscillator();
+        const gain = audioContext2.createGain();
+        osc.connect(gain); gain.connect(audioContext2.destination);
+        const freq = [600, 800, 1000][i];
+        osc.frequency.setValueAtTime(freq, now2 + i * 0.1);
+        gain.gain.setValueAtTime(0.3, now2 + i * 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.01, now2 + i * 0.1 + 0.15);
+        osc.start(now2 + i * 0.1); osc.stop(now2 + i * 0.1 + 0.15);
+      }
+    }
+  } catch(e) {}
+}
+
+function initGameState(gameMode = "normal", maxStreakOverride = 0, customMaxRounds = ROUNDS_MAX) {
+  const baseState = { log: [] };
   if(gameMode === "challenge") {
-    return {
-      round:1, phase:"throwing", turn:0, playerIdx:0,
-      score:0, streak:0, maxStreak:maxStreakOverride,
-      log:[], gameMode:"challenge",
-    };
+    return { ...baseState, round:1, phase:"throwing", turn:0, playerIdx:0, score:0, streak:0, maxStreak:maxStreakOverride, gameMode:"challenge", stats: { totalThrows: 0, hitLog: 0, points: 0, zoneHits: [0, 0, 0] } };
+  }
+  if(gameMode === "realChallenge") {
+    return { ...baseState, round:1, phase:"throwing", turn:0, playerIdx:0, score:0, streak:0, maxStreak:maxStreakOverride, gameMode:"realChallenge", stats: { totalThrows: 0, hitLog: 0, points: 0, zoneHits: [0, 0, 0] } };
   }
   if(gameMode === "practice") {
-    return {
-      round:1, phase:"throwing", turn:0, playerIdx:0,
-      log:[], gameMode:"practice", showTrajectory: true,
-    };
+    return { ...baseState, round:1, phase:"throwing", turn:0, playerIdx:0, gameMode:"practice", showTrajectory: true, stats: { totalThrows: 0, hitLog: 0, points: 0, zoneHits: [0, 0, 0] } };
   }
-  return {
-    round:1, phase:"throwing", turn:0, playerIdx:0,
-    scores:[Array(ROUNDS_MAX).fill(0),Array(ROUNDS_MAX).fill(0)],
-    roundMarkers:[], log:[], maxRounds:ROUNDS_MAX, gameMode:"normal",
-  };
+  return { ...baseState, round:1, phase:"throwing", turn:0, playerIdx:0, scores:[Array(customMaxRounds).fill(0),Array(customMaxRounds).fill(0)], roundMarkers:[], maxRounds:customMaxRounds, gameMode:gameMode || "normal", stats: [{ totalThrows: 0, hitLog: 0, points: 0, zoneHits: [0, 0, 0] }, { totalThrows: 0, hitLog: 0, points: 0, zoneHits: [0, 0, 0] }] };
+}
+
+function updateStats(stats, result) {
+  const newStats = {...stats};
+  newStats.totalThrows += 1;
+  if(result.hitMarutai) {
+    newStats.hitLog += 1;
+    if(result.inZone) {
+      newStats.points += result.pts;
+      newStats.zoneHits[result.zoneIdx] += 1;
+    }
+  }
+  return newStats;
+}
+
+function determineNextTurn(state, roundMarkers) {
+  const team = state.turn;
+  let nextTurn = team, nextPlayerIdx = state.playerIdx, nextPhase = state.phase;
+  let nextRound = state.round, nextMaxRounds = state.maxRounds;
+  let newScores = state.scores.map(s => [...s]);
+  let finalRM = roundMarkers;
+  
+  if(team === 0 && state.playerIdx < PLAYERS - 1) {
+    nextPlayerIdx = state.playerIdx + 1;
+  } else if(team === 0) {
+    nextTurn = 1; nextPlayerIdx = 0;
+  } else if(team === 1 && state.playerIdx < PLAYERS - 1) {
+    nextPlayerIdx = state.playerIdx + 1;
+  } else {
+    const aScore = roundMarkers.filter(m => m.team === 0).reduce((s, m) => s + m.pts, 0);
+    const bScore = roundMarkers.filter(m => m.team === 1).reduce((s, m) => s + m.pts, 0);
+    newScores[0][state.round - 1] = aScore;
+    newScores[1][state.round - 1] = bScore;
+    const totalA = newScores[0].reduce((a, b) => a + b, 0);
+    const totalB = newScores[1].reduce((a, b) => a + b, 0);
+    if(state.round >= state.maxRounds) {
+      if(totalA !== totalB) {
+        nextPhase = "gameEnd";
+        playSound("gameEnd");
+      } else {
+        nextMaxRounds++;
+      }
+    } else {
+      nextPhase = "roundEnd";
+    }
+    finalRM = [];
+    nextRound++;
+    nextTurn = 0;
+    nextPlayerIdx = 0;
+  }
+  return {nextTurn, nextPlayerIdx, nextPhase, nextRound, nextMaxRounds, newScores, finalRM};
+}
+
+function gameReducer(state, action) {
+  switch(action.type) {
+    case "FINISH_THROW": {
+      const result = action.payload.result;
+      const gameMode = state.gameMode;
+      const logLine = action.payload.logLine;
+      
+      if(gameMode === "practice") {
+        return {...state, round: state.round + 1, log: [...state.log, logLine], stats: updateStats(state.stats, result)};
+      }
+      if(gameMode === "challenge" || gameMode === "realChallenge") {
+        const newScore = state.score + (result.inZone ? result.pts : 0);
+        const isGameOver = !result.hitMarutai || (result.hitMarutai && !result.inZone);
+        const newStreak = isGameOver ? 0 : state.streak + 1;
+        const newMaxStreak = Math.max(state.maxStreak, newStreak);
+        if(isGameOver) {
+          return {...state, score: newScore, streak: 0, maxStreak: newMaxStreak, phase: "gameEnd", log: [...state.log, logLine], stats: updateStats(state.stats, result)};
+        }
+        return {...state, round: state.round + 1, score: newScore, streak: newStreak, maxStreak: newMaxStreak, log: [...state.log, logLine], stats: updateStats(state.stats, result)};
+      }
+      const team = state.turn;
+      const newMarker = result.inZone ? {team, pts:result.pts, lx:result.lx, ly:result.ly, zoneIdx:result.zoneIdx} : null;
+      const newRM = newMarker ? [...state.roundMarkers, newMarker] : state.roundMarkers;
+      const newStats = [...state.stats];
+      newStats[team] = updateStats(state.stats[team], result);
+      const nextState = determineNextTurn(state, newRM);
+      return {...state, log: [...state.log, logLine], turn: nextState.nextTurn, playerIdx: nextState.nextPlayerIdx, phase: nextState.nextPhase, round: nextState.nextRound, maxRounds: nextState.nextMaxRounds, scores: nextState.newScores, roundMarkers: nextState.finalRM, stats: newStats};
+    }
+    case "NEXT_ROUND":
+      return {...state, phase: "throwing"};
+    case "INIT_GAME":
+      return initGameState(action.payload.gameMode, action.payload.maxStreakOverride, action.payload.customMaxRounds);
+    default:
+      return state;
+  }
+}
+
+function useScoreStorage() {
+  const [scores, setScores] = useState(() => {
+    try {
+      const saved = localStorage.getItem("kurudugaScores");
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(s => typeof s.score === 'number' && typeof s.streak === 'number' && typeof s.date === 'string') : [];
+    } catch {
+      localStorage.removeItem("kurudugaScores");
+      return [];
+    }
+  });
+  const saveScores = useCallback((newScores) => {
+    try { setScores(newScores); localStorage.setItem("kurudugaScores", JSON.stringify(newScores)); } catch (e) { console.error("Failed to save scores:", e); }
+  }, []);
+  const addScore = useCallback((score, streak) => {
+    const newScoreRecord = { score, streak, date: new Date().toLocaleDateString('ja-JP') };
+    const updatedScores = [newScoreRecord, ...scores].sort((a, b) => b.score - a.score).slice(0, 5);
+    saveScores(updatedScores);
+  }, [scores, saveScores]);
+  const resetScores = useCallback(() => {
+    try { setScores([]); localStorage.removeItem("kurudugaScores"); } catch (e) { console.error("Failed to reset scores:", e); }
+  }, []);
+  return { scores, saveScores, addScore, resetScores };
+}
+
+function useOverallStats() {
+  const [stats, setStats] = useState(() => {
+    try {
+      const saved = localStorage.getItem("kurudugaOverallStats");
+      if (!saved) return { totalThrows: 0, totalHits: 0, totalPoints: 0, zoneHits: [0, 0, 0], gameCount: 0 };
+      const parsed = JSON.parse(saved);
+      if (typeof parsed.totalThrows !== 'number' || !Array.isArray(parsed.zoneHits) || parsed.zoneHits.length !== 3) {
+        return { totalThrows: 0, totalHits: 0, totalPoints: 0, zoneHits: [0, 0, 0], gameCount: 0 };
+      }
+      return parsed;
+    } catch {
+      localStorage.removeItem("kurudugaOverallStats");
+      return { totalThrows: 0, totalHits: 0, totalPoints: 0, zoneHits: [0, 0, 0], gameCount: 0 };
+    }
+  });
+  const saveStats = useCallback((newStats) => {
+    try { setStats(newStats); localStorage.setItem("kurudugaOverallStats", JSON.stringify(newStats)); } catch (e) { console.error("Failed to save overall stats:", e); }
+  }, []);
+  const addGameStats = useCallback((gameStats) => {
+    const newStats = {...stats};
+    newStats.totalThrows += gameStats.totalThrows || 0;
+    newStats.totalHits += gameStats.hitLog || 0;
+    newStats.totalPoints += gameStats.points || 0;
+    newStats.zoneHits = newStats.zoneHits.map((z, i) => z + (gameStats.zoneHits[i] || 0));
+    newStats.gameCount += 1;
+    saveStats(newStats);
+  }, [stats, saveStats]);
+  const resetStats = useCallback(() => {
+    try {
+      const emptyStats = { totalThrows: 0, totalHits: 0, totalPoints: 0, zoneHits: [0, 0, 0], gameCount: 0 };
+      setStats(emptyStats);
+      localStorage.removeItem("kurudugaOverallStats");
+    } catch (e) { console.error("Failed to reset overall stats:", e); }
+  }, []);
+  return { stats, saveStats, addGameStats, resetStats };
+}
+
+function useRealChallengeStats() {
+  const [scores, setScores] = useState(() => {
+    try {
+      const saved = localStorage.getItem("kurudugaRealChallengeScores");
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(s => typeof s.score === 'number' && typeof s.streak === 'number' && typeof s.date === 'string') : [];
+    } catch {
+      localStorage.removeItem("kurudugaRealChallengeScores");
+      return [];
+    }
+  });
+  const saveScores = useCallback((newScores) => {
+    try { setScores(newScores); localStorage.setItem("kurudugaRealChallengeScores", JSON.stringify(newScores)); } catch (e) { console.error("Failed to save real challenge scores:", e); }
+  }, []);
+  const addScore = useCallback((score, streak) => {
+    const newScoreRecord = { score, streak, date: new Date().toLocaleDateString('ja-JP') };
+    const updatedScores = [newScoreRecord, ...scores].sort((a, b) => b.score - a.score).slice(0, 5);
+    saveScores(updatedScores);
+  }, [scores, saveScores]);
+  const resetScores = useCallback(() => {
+    try { setScores([]); localStorage.removeItem("kurudugaRealChallengeScores"); } catch (e) { console.error("Failed to reset real challenge scores:", e); }
+  }, []);
+  return { scores, saveScores, addScore, resetScores };
+}
+
+function useShotStorage() {
+  const [shots, setShots] = useState(() => {
+    try {
+      const saved = localStorage.getItem("kurudugaShots");
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      localStorage.removeItem("kurudugaShots");
+      return [];
+    }
+  });
+  
+  const addShot = useCallback((pts, result) => {
+    try {
+      const newShot = {
+        pts: pts,
+        result: result,
+        timestamp: new Date().toISOString(),
+        isSuccess: result.hitMarutai && result.inZone
+      };
+      const updatedShots = [newShot, ...shots].slice(0, 25);
+      setShots(updatedShots);
+      localStorage.setItem("kurudugaShots", JSON.stringify(updatedShots));
+    } catch (e) {
+      console.error("Failed to save shot:", e);
+    }
+  }, [shots]);
+  
+  const deleteShot = useCallback((idx) => {
+    try {
+      const updatedShots = shots.filter((_, i) => i !== idx);
+      setShots(updatedShots);
+      localStorage.setItem("kurudugaShots", JSON.stringify(updatedShots));
+    } catch (e) {
+      console.error("Failed to delete shot:", e);
+    }
+  }, [shots]);
+  
+  const deleteAllShots = useCallback(() => {
+    try {
+      setShots([]);
+      localStorage.removeItem("kurudugaShots");
+    } catch (e) {
+      console.error("Failed to delete all shots:", e);
+    }
+  }, []);
+  
+  return { shots, addShot, deleteShot, deleteAllShots };
+}
+
+function drawBackground(ctx) {
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, CH);
+  bgGrad.addColorStop(0, "#1a4d6d");
+  bgGrad.addColorStop(0.5, "#0d8fa3");
+  bgGrad.addColorStop(1, "#00b4d8");
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, CW, CH);
+}
+
+function drawField(ctx) {
+  ctx.fillStyle = "#f5d69f";
+  ctx.beginPath();
+  ctx.roundRect(40, FIELD_TOP, CW-80, FIELD_BOT-FIELD_TOP, 16);
+  ctx.fill();
+  ctx.strokeStyle = "#daa55b";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.strokeStyle = "#d4a76a33";
+  ctx.lineWidth = 1;
+  for(let i = 0; i <= 4; i++) {
+    const x = 40 + (CW - 80) * (i / 4);
+    ctx.beginPath();
+    ctx.moveTo(x, FIELD_TOP);
+    ctx.lineTo(x, FIELD_BOT);
+    ctx.stroke();
+  }
+}
+
+function drawZones(ctx) {
+  ZONE_DEFS.forEach((z, i) => {
+    const zx = ZONE_X + i * ZONE_W;
+    ctx.fillStyle = z.color;
+    ctx.fillRect(zx, ZONE_TOP_Y, ZONE_W, ZONE_H);
+    ctx.strokeStyle = "#ffffff66";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(zx, ZONE_TOP_Y, ZONE_W, ZONE_H);
+    ctx.fillStyle = z.tc;
+    ctx.font = "bold 14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(z.label, zx + ZONE_W/2, ZONE_BOT_Y + 18);
+  });
+}
+
+function drawLog(ctx) {
+  const logLeft = LOG_CX - LOG_W/2, logRight = LOG_CX + LOG_W/2;
+  const rxRef = LOG_W/2, ryRef = LOG_RY * 0.6;
+  ctx.save();
+  const logGrad = ctx.createLinearGradient(logLeft, 0, logRight, 0);
+  logGrad.addColorStop(0, "#8b6f47");
+  logGrad.addColorStop(0.2, "#a0826d");
+  logGrad.addColorStop(0.5, "#c9a877");
+  logGrad.addColorStop(0.8, "#a0826d");
+  logGrad.addColorStop(1, "#8b6f47");
+  ctx.fillStyle = logGrad;
+  ctx.beginPath();
+  ctx.moveTo(logLeft, LOG_TOP + LOG_RY);
+  ctx.lineTo(logLeft, LOG_BOT - LOG_RY);
+  ctx.ellipse(LOG_CX, LOG_BOT - LOG_RY, rxRef, ryRef, 0, Math.PI, 0, true);
+  ctx.lineTo(logRight, LOG_TOP + LOG_RY);
+  ctx.ellipse(LOG_CX, LOG_TOP + LOG_RY, rxRef, ryRef, 0, 0, Math.PI, false);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#6b5837";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(logLeft, LOG_TOP + LOG_RY);
+  ctx.lineTo(logLeft, LOG_BOT - LOG_RY);
+  ctx.ellipse(LOG_CX, LOG_BOT - LOG_RY, rxRef, ryRef, 0, Math.PI, 0, true);
+  ctx.lineTo(logRight, LOG_TOP + LOG_RY);
+  ctx.stroke();
+  const endGrad = ctx.createRadialGradient(LOG_CX, LOG_TOP + LOG_RY, 0, LOG_CX, LOG_TOP + LOG_RY, rxRef);
+  endGrad.addColorStop(0, "#e8d4b0");
+  endGrad.addColorStop(0.7, "#c9a877");
+  endGrad.addColorStop(1, "#8b6f47");
+  ctx.beginPath();
+  ctx.ellipse(LOG_CX, LOG_TOP + LOG_RY, rxRef, ryRef, 0, 0, Math.PI*2);
+  ctx.fillStyle = endGrad;
+  ctx.fill();
+  ctx.strokeStyle = "#6b5837";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.strokeStyle = "#7a6a5a44";
+  ctx.lineWidth = 1;
+  for(let r = 0.2; r < 0.9; r += 0.15) {
+    ctx.beginPath();
+    ctx.ellipse(LOG_CX, LOG_TOP + LOG_RY, rxRef*r, ryRef*r, 0, 0, Math.PI*2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawRoundMarkers(ctx, roundMarkers) {
+  if(!roundMarkers || !Array.isArray(roundMarkers)) return;
+  roundMarkers.forEach((m, i) => {
+    if(!m || m.zoneIdx === undefined || m.ly === undefined) return;
+    const zx = ZONE_X + m.zoneIdx * ZONE_W;
+    const mx = zx + ZONE_W/2 + (i%2 === 0 ? -10 : 10);
+    ctx.beginPath();
+    ctx.arc(mx, m.ly, 9, 0, Math.PI*2);
+    ctx.fillStyle = TEAM_COLOR[m.team] || "#ccc";
+    ctx.fill();
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 10px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(m.pts, mx, m.ly);
+  });
+}
+
+function drawProjectile(ctx, anim) {
+  if(!anim || !anim.pts || anim.idx >= anim.pts.length) return;
+  const p = anim.pts[anim.idx];
+  const p2 = anim.pts[Math.min(anim.idx+1, anim.pts.length-1)];
+  if(!p || !p2) return;
+  const angle = Math.atan2(p2.y - p.y, p2.x - p.x);
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(angle);
+  ctx.fillStyle = "#a0826d";
+  ctx.fillRect(-22, -4, 44, 8);
+  ctx.restore();
+}
+
+function drawDragPreview(ctx, inputState, gameState, animState) {
+  if(!ctx || !inputState || !gameState || animState.isThrowing) return;
+  const {ox, oy, cx, cy} = inputState;
+  if(ox === null || oy === null || cx === null || cy === null) return;
+  const ddx = cx - ox, ddy = cy - oy, len = Math.sqrt(ddx*ddx + ddy*ddy);
+  if(len <= 4) return;
+  
+  const clamp = Math.min(len, PHYSICS.DRAG_MAX);
+  const ex = ox + ddx/len * clamp, ey = oy + ddy/len * clamp;
+  ctx.strokeStyle = "#ff6b9d";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.moveTo(ox, oy);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  
+  const {vx, vy} = dragToVelocity(ddx, ddy);
+  const pts = simTraj(ox, oy, vx, vy);
+  
+  if(gameState.gameMode !== "realChallenge") {
+    ctx.strokeStyle = TEAM_COLOR[gameState.turn] + "99";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  
+  const col = checkLog(pts);
+  if(col.hit) {
+    ctx.beginPath();
+    ctx.arc(col.hx, col.hy, 7, 0, Math.PI*2);
+    ctx.fillStyle = "#4ade8099";
+    ctx.fill();
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    if(gameState.gameMode === "practice") {
+      const bouncePts = bounceFromLog(col.hx, col.hy, col.vx, col.vy, true);
+      ctx.strokeStyle = "#ff6b9d";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      bouncePts.forEach((pt, i) => {
+        if(i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+  
+  const pct = clamp / PHYSICS.DRAG_MAX;
+  const gaugeX = 20, gaugeY = CH - 50, gaugeW = CW - 40, gaugeH = 14;
+  ctx.fillStyle = "#0002";
+  ctx.beginPath();
+  ctx.roundRect(gaugeX, gaugeY, gaugeW, gaugeH, 7);
+  ctx.fill();
+  ctx.fillStyle = "#439500";
+  ctx.beginPath();
+  ctx.roundRect(gaugeX, gaugeY, gaugeW*pct, gaugeH, 7);
+  ctx.fill();
+  ctx.strokeStyle = "#ffffff99";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(gaugeX, gaugeY, gaugeW, gaugeH, 7);
+  ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.font = "11px sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(`パワー ${Math.round(pct*100)}%`, gaugeX + 10, gaugeY + gaugeH/2);
+}
+
+function drawPlayers(ctx, gameState, animState, inputState, mode) {
+  if(!gameState || gameState.phase !== "throwing" || animState.isThrowing) return;
+  [0, 1, 2].forEach(i => {
+    const py = playerY(i);
+    const isActive = i === gameState.playerIdx;
+    const r = isActive ? 23 : 16;
+    ctx.beginPath();
+    ctx.arc(THROW_X, py, r, 0, Math.PI*2);
+    ctx.fillStyle = isActive ? TEAM_COLOR[gameState.turn] : "#e0e0e0";
+    ctx.fill();
+    ctx.strokeStyle = isActive ? TEAM_COLOR[gameState.turn] : "#b0b0b0";
+    ctx.lineWidth = isActive ? 2 : 1.5;
+    ctx.stroke();
+    ctx.fillStyle = isActive ? "#fff" : "#333";
+    ctx.font = `${isActive ? "bold " : ""}${isActive ? 12 : 11}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`P${i+1}`, THROW_X, py);
+  });
+  if(!inputState.ox) {
+    ctx.fillStyle = TEAM_COLOR[gameState.gameMode === "challenge" || gameState.gameMode === "realChallenge" ? 0 : gameState.turn] + "dd";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("ドラッグして投げる", THROW_X, playerY(2) + 50);
+  }
 }
 
 function App() {
   const [mode, setMode] = useState(null);
   const [aiDiff, setAiDiff] = useState(0.5);
-  const [g, setG] = useState(initGame());
-  const [drag, setDrag] = useState(null);
-  const [anim, setAnim] = useState(null);
-  const [throwing, setThrowing] = useState(false);
-  const [lastResult, setLastResult] = useState(null);
-  const [challengeRecord, setChallengeRecord] = useState(0);
-  const [scores, setScores] = useState(() => {
-    try {
-      const saved = localStorage.getItem("kurudugaScores");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [customRounds, setCustomRounds] = useState(ROUNDS_MAX);
+  const [showStats, setShowStats] = useState(false);
+  const [showShotManager, setShowShotManager] = useState(false);
+  const [gameState, dispatchGame] = useReducer(gameReducer, initGameState());
+  const [inputState, setInputState] = useState({ox: null, oy: null, cx: null, cy: null});
+  const [animState, setAnimState] = useState({anim: null, isThrowing: false, lastResult: null});
+  const [replayState, setReplayState] = useState({isReplaying: false, lastThrowData: null});
+  
+  const { scores, addScore, resetScores } = useScoreStorage();
+  const { stats: overallStats, addGameStats, resetStats } = useOverallStats();
+  const { scores: realChallengeScores, addScore: addRealChallengeScore, resetScores: resetRealChallengeScores } = useRealChallengeStats();
+  const { shots, addShot, deleteShot, deleteAllShots } = useShotStorage();
+  
   const canvasRef = useRef(null);
   const logRef = useRef(null);
   const animRef = useRef(null);
-  const gRef = useRef(g);
+  const gameStateRef = useRef(gameState);
   const modeRef = useRef(mode);
   
-  useEffect(() => { gRef.current = g; }, [g]);
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
-  useEffect(() => { if(logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [g.log]);
+  useEffect(() => { if(logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [gameState.log]);
 
   useEffect(() => {
-    if(mode !== "ai") return;
-    if(g.phase !== "throwing") return;
-    if(g.turn !== 1) return;
-    if(throwing) return;
+    if(mode !== "ai" || gameState.phase !== "throwing" || gameState.turn !== 1 || animState.isThrowing) return;
     const timer = setTimeout(() => {
-      const ox = THROW_X, oy = playerY(g.playerIdx);
-      
-      let targetY, powerPercent;
-      if(aiDiff >= 0.7) {
-        targetY = LOG_TOP + 10;
-        powerPercent = 0.30;
-      } else if(aiDiff >= 0.4) {
-        targetY = LOG_TOP + (LOG_BOT - LOG_TOP) * 0.3;
-        powerPercent = 0.25;
-      } else {
-        targetY = (LOG_TOP + LOG_BOT) / 2;
-        powerPercent = 0.15;
+      const ox = THROW_X, oy = playerY(gameState.playerIdx);
+      let diffConfig = aiDiff >= 0.7 ? AI_DIFFICULTY.HARD : aiDiff >= 0.4 ? AI_DIFFICULTY.NORMAL : AI_DIFFICULTY.EASY;
+      let targetY = diffConfig.targetY(LOG_TOP, LOG_BOT);
+      if(diffConfig.usePrediction) {
+        const prediction = predictAIThrow(targetY, diffConfig.powerPercent);
+        if(prediction.confidence > 0.7) targetY = prediction.adjustedTargetY;
       }
-      
+      const powerPercent = diffConfig.powerPercent;
+      const noiseAmount = diffConfig.noiseAmount;
       const needDy = targetY - oy;
-      const dx = -DRAG_MAX * powerPercent;
-      const dy = DRAG_MAX * powerPercent * 0.4 + (needDy * 0.1);
-      const noise = (1 - aiDiff) * 20;
+      const dx = -PHYSICS.DRAG_MAX * powerPercent;
+      const dy = PHYSICS.DRAG_MAX * powerPercent * 0.4 + (needDy * 0.1);
+      const noise = noiseAmount * 20;
       const finalDx = dx + (Math.random() - 0.5) * noise;
       const finalDy = dy + (Math.random() - 0.5) * noise * 0.2;
-      
       const {vx, vy} = dragToVelocity(finalDx, finalDy);
       executeThrow(ox, oy, vx, vy);
-    }, 800);
+    }, THROW_PARAMS.THROW_DELAY_AI);
     return () => clearTimeout(timer);
-  }, [g.turn, g.playerIdx, g.phase, throwing, mode, aiDiff]);
+  }, [mode, gameState.phase, gameState.turn, gameState.playerIdx, animState.isThrowing, aiDiff]);
 
-  const executeThrow = (ox, oy, vx, vy) => {
+  const executeThrow = useCallback((ox, oy, vx, vy) => {
+    const currentGameState = gameStateRef.current;
     const flyPts = simTraj(ox, oy, vx, vy, 140);
     const col = checkLog(flyPts);
     let result, fullPts, bouncePts = null;
-    const isDeterministic = g.gameMode === "practice";
+    const isDeterministic = currentGameState.gameMode === "practice";
+    
     if(!col.hit) {
       result = {hitMarutai:false, pts:0, inZone:false};
       fullPts = flyPts;
@@ -227,301 +751,84 @@ function App() {
         : {hitMarutai:true, pts:0, inZone:false};
       fullPts = [...prePts, ...bouncePts];
     }
-    setLastResult(result);
-    setThrowing(true);
+    
+    setReplayState({isReplaying: false, lastThrowData: {pts: fullPts, bouncePts, col, result}});
+    setAnimState(prev => ({...prev, isThrowing: true, lastResult: result, anim: {pts: fullPts, bouncePts, col, result}}));
+    
+    const isAIThrow = modeRef.current === "ai" && currentGameState.turn === 1;
+    if(!isAIThrow) {
+      addShot(fullPts, result);
+    }
+    
     let idx = 0;
-    setAnim({pts:fullPts, idx, bouncePts: bouncePts, col: col});
     const tick = () => {
       idx += 3;
       if(idx >= fullPts.length) {
-        setAnim(null);
         finishThrow(result);
         return;
       }
-      setAnim(a => ({...a, idx}));
+      setAnimState(prev => ({...prev, anim: prev.anim ? {...prev.anim, idx} : null}));
       animRef.current = requestAnimationFrame(tick);
     };
     animRef.current = requestAnimationFrame(tick);
-  };
+  }, [addShot]);
 
-  const finishThrow = (result) => {
-    setG(prev => {
-      if(prev.gameMode === "practice") {
-        const logLine = result.hitMarutai && result.inZone
-          ? `${prev.round}投目: ${result.pts}点（命中位置: ${result.zoneIdx + 1}pt ゾーン）`
-          : result.hitMarutai
-          ? `${prev.round}投目: 丸太命中 → ゾーン外`
-          : `${prev.round}投目: 外れ`;
-        return {
-          ...prev,
-          round: prev.round + 1,
-          log: [...prev.log, logLine]
-        };
-      }
+  const finishThrow = useCallback((result) => {
+    setAnimState(prev => ({...prev, anim: null, isThrowing: false}));
+    
+    if(result.hitMarutai && result.inZone) playSound("zone");
+    else if(result.hitMarutai) playSound("hit");
+    else playSound("miss");
+    
+    const s = gameStateRef.current;
+    const gameMode = s.gameMode;
+    let logLine = "";
+    
+    if(gameMode === "practice") {
+      logLine = result.hitMarutai && result.inZone ? `${s.round}投目: ${result.pts}点（命中位置: ${result.zoneIdx + 1}pt ゾーン）` : result.hitMarutai ? `${s.round}投目: 丸太命中 → ゾーン外` : `${s.round}投目: 外れ`;
+    } else if(gameMode === "challenge" || gameMode === "realChallenge") {
+      logLine = result.hitMarutai && result.inZone ? `${s.round}投目: ${result.pts}点ゲット！（合計${s.score + result.pts}点）` : result.hitMarutai ? `${s.round}投目: ゾーン外...（合計${s.score}点）` : `${s.round}投目: 外れ...`;
+    } else {
+      const TEAM_NAME = modeRef.current === "ai" ? TEAM_NAME_AI : TEAM_NAME_PVP;
+      logLine = result.hitMarutai ? (result.inZone ? `R${s.round} ${TEAM_NAME[s.turn]} P${s.playerIdx+1}: 丸太命中 → ${result.pts}点` : `R${s.round} ${TEAM_NAME[s.turn]} P${s.playerIdx+1}: 丸太命中 → ゾーン外`) : `R${s.round} ${TEAM_NAME[s.turn]} P${s.playerIdx+1}: 外れ`;
+    }
+    
+    dispatchGame({type: "FINISH_THROW", payload: {result, logLine}});
+  }, []);
 
-      if(prev.gameMode === "challenge") {
-        const logLine = result.hitMarutai && result.inZone
-          ? `${prev.round}投目: ${result.pts}点ゲット！（合計${prev.score + result.pts}点）`
-          : result.hitMarutai
-          ? `${prev.round}投目: ゾーン外...（合計${prev.score}点）`
-          : `${prev.round}投目: 外れ...`;
-        
-        const newScore = prev.score + (result.inZone ? result.pts : 0);
-        const isGameOver = !result.hitMarutai || (result.hitMarutai && !result.inZone);
-        const newStreak = isGameOver ? 0 : prev.streak + 1;
-        const newMaxStreak = Math.max(prev.maxStreak, newStreak);
-        
-        if(isGameOver) {
-          setChallengeRecord(newMaxStreak);
-          const newScoreRecord = { score: newScore, streak: newMaxStreak, date: new Date().toLocaleDateString('ja-JP') };
-          const updatedScores = [newScoreRecord, ...scores].sort((a, b) => b.score - a.score).slice(0, 10);
-          setScores(updatedScores);
-          localStorage.setItem("kurudugaScores", JSON.stringify(updatedScores));
-          return {
-            ...prev,
-            score: newScore,
-            streak: 0,
-            maxStreak: newMaxStreak,
-            phase: "gameEnd",
-            log: [...prev.log, logLine]
-          };
-        } else {
-          return {
-            ...prev,
-            round: prev.round + 1,
-            score: newScore,
-            streak: newStreak,
-            maxStreak: newMaxStreak,
-            log: [...prev.log, logLine]
-          };
-        }
+  const playReplay = useCallback(() => {
+    if(!replayState.lastThrowData) return;
+    setReplayState(prev => ({...prev, isReplaying: true}));
+    setAnimState(prev => ({...prev, isThrowing: true, anim: {...replayState.lastThrowData, idx: 0}}));
+    const fullPts = replayState.lastThrowData.pts;
+    let idx = 0;
+    const tick = () => {
+      idx += 3;
+      if(idx >= fullPts.length) {
+        setAnimState(prev => ({...prev, isThrowing: false, anim: null}));
+        setReplayState(prev => ({...prev, isReplaying: false}));
+        return;
       }
-
-      const team = prev.turn, player = prev.playerIdx;
-      const TEAM_NAME = mode === "ai" ? TEAM_NAME_AI : TEAM_NAME_PVP;
-      const logLine = result.hitMarutai
-        ? (result.inZone ? `R${prev.round} ${TEAM_NAME[team]} P${player+1}: 丸太命中 → ${result.pts}点`
-                         : `R${prev.round} ${TEAM_NAME[team]} P${player+1}: 丸太命中 → ゾーン外`)
-        : `R${prev.round} ${TEAM_NAME[team]} P${player+1}: 外れ`;
-      const newMarker = result.inZone ? {team, pts:result.pts, lx:result.lx, ly:result.ly, zoneIdx:result.zoneIdx} : null;
-      const newRM = newMarker ? [...prev.roundMarkers, newMarker] : prev.roundMarkers;
-      let nt = team, np = player, nph = prev.phase, ns = prev.scores.map(s => [...s]), nmax = prev.maxRounds, xlog = null;
-      
-      if(team === 0 && player < PLAYERS-1) { np = player + 1; }
-      else if(team === 0) { nt = 1; np = 0; }
-      else if(team === 1 && player < PLAYERS-1) { np = player + 1; }
-      else {
-        const aS = newRM.filter(m => m.team === 0).reduce((s, m) => s + m.pts, 0);
-        const bS = newRM.filter(m => m.team === 1).reduce((s, m) => s + m.pts, 0);
-        ns[0][prev.round-1] = aS;
-        ns[1][prev.round-1] = bS;
-        const tA = ns[0].reduce((a, b) => a + b, 0), tB = ns[1].reduce((a, b) => a + b, 0);
-        xlog = `── R${prev.round}終了  A:${aS}点 / B:${bS}点 ──`;
-        if(prev.round >= prev.maxRounds) {
-          if(tA !== tB) nph = "gameEnd";
-          else { nmax++; xlog += " 同点！延長"; }
-        } else nph = "roundEnd";
-        return {...prev, round:prev.round+1, phase:nph, turn:0, playerIdx:0, scores:ns, roundMarkers:[], maxRounds:nmax, log:[...prev.log, logLine, xlog].filter(Boolean)};
-      }
-      return {...prev, turn:nt, playerIdx:np, roundMarkers:newRM, log:[...prev.log, logLine]};
-    });
-    setThrowing(false);
-  };
+      setAnimState(prev => ({...prev, anim: prev.anim ? {...prev.anim, idx} : null}));
+      animRef.current = requestAnimationFrame(tick);
+    };
+    animRef.current = requestAnimationFrame(tick);
+  }, [replayState.lastThrowData]);
 
   useEffect(() => {
     const cvs = canvasRef.current;
-    if(!cvs) return;
+    if(!cvs || !gameState) return;
     const ctx = cvs.getContext("2d");
     ctx.clearRect(0, 0, CW, CH);
-    ctx.fillStyle = "#e8f0e0";
-    ctx.fillRect(0, 0, CW, CH);
-    ctx.fillStyle = "#d4c890";
-    ctx.beginPath();
-    ctx.roundRect(30, FIELD_TOP, CW-60, FIELD_BOT-FIELD_TOP, 12);
-    ctx.fill();
-    ctx.strokeStyle = "#b0a060";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ZONE_DEFS.forEach((z, i) => {
-      const zx = ZONE_X + i * ZONE_W;
-      ctx.fillStyle = z.color;
-      ctx.fillRect(zx, ZONE_TOP_Y, ZONE_W, ZONE_H);
-      ctx.strokeStyle = "#99000055";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(zx, ZONE_TOP_Y, ZONE_W, ZONE_H);
-      ctx.fillStyle = z.tc;
-      ctx.font = "bold 14px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(z.label, zx + ZONE_W/2, ZONE_BOT_Y + 18);
-    });
-
-    const logLeft = LOG_CX - LOG_W/2, logRight = LOG_CX + LOG_W/2;
-    const rxRef = LOG_W/2, ryRef = LOG_RY * 0.6;
-    ctx.save();
-    const logGrad = ctx.createLinearGradient(logLeft, 0, logRight, 0);
-    logGrad.addColorStop(0, "#3d1a06");
-    logGrad.addColorStop(0.2, "#5a2d0c");
-    logGrad.addColorStop(0.5, "#8b4513");
-    logGrad.addColorStop(0.8, "#a0522d");
-    logGrad.addColorStop(1, "#5a2d0c");
-    ctx.fillStyle = logGrad;
-    ctx.beginPath();
-    ctx.moveTo(logLeft, LOG_TOP + LOG_RY);
-    ctx.lineTo(logLeft, LOG_BOT - LOG_RY);
-    ctx.ellipse(LOG_CX, LOG_BOT - LOG_RY, rxRef, ryRef, 0, Math.PI, 0, true);
-    ctx.lineTo(logRight, LOG_TOP + LOG_RY);
-    ctx.ellipse(LOG_CX, LOG_TOP + LOG_RY, rxRef, ryRef, 0, 0, Math.PI, false);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = "#2d0e00";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(logLeft, LOG_TOP + LOG_RY);
-    ctx.lineTo(logLeft, LOG_BOT - LOG_RY);
-    ctx.ellipse(LOG_CX, LOG_BOT - LOG_RY, rxRef, ryRef, 0, Math.PI, 0, true);
-    ctx.lineTo(logRight, LOG_TOP + LOG_RY);
-    ctx.stroke();
-    const endGrad = ctx.createRadialGradient(LOG_CX, LOG_TOP + LOG_RY, 0, LOG_CX, LOG_TOP + LOG_RY, rxRef);
-    endGrad.addColorStop(0, "#d2b48c");
-    endGrad.addColorStop(0.7, "#8b4513");
-    endGrad.addColorStop(1, "#5a2d0c");
-    ctx.beginPath();
-    ctx.ellipse(LOG_CX, LOG_TOP + LOG_RY, rxRef, ryRef, 0, 0, Math.PI*2);
-    ctx.fillStyle = endGrad;
-    ctx.fill();
-    ctx.strokeStyle = "#2d0e00";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.strokeStyle = "#5a300844";
-    ctx.lineWidth = 1;
-    for(let r = 0.2; r < 0.9; r += 0.15) {
-      ctx.beginPath();
-      ctx.ellipse(LOG_CX, LOG_TOP + LOG_RY, rxRef*r, ryRef*r, 0, 0, Math.PI*2);
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    g.roundMarkers?.forEach((m, i) => {
-      const zx = ZONE_X + m.zoneIdx * ZONE_W;
-      const mx = zx + ZONE_W/2 + (i%2 === 0 ? -10 : 10);
-      ctx.beginPath();
-      ctx.arc(mx, m.ly, 9, 0, Math.PI*2);
-      ctx.fillStyle = TEAM_COLOR[m.team];
-      ctx.fill();
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 9px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(m.pts, mx, m.ly + 3);
-    });
-
-    if(anim && anim.idx < anim.pts.length) {
-      const p = anim.pts[anim.idx], p2 = anim.pts[Math.min(anim.idx+1, anim.pts.length-1)];
-      const angle = Math.atan2(p2.y - p.y, p2.x - p.x);
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(angle);
-      ctx.fillStyle = "#5D4037";
-      ctx.fillRect(-22, -4, 44, 8);
-      ctx.restore();
-    }
-
-    if(drag && !throwing) {
-      const {ox, oy, cx, cy} = drag;
-      const ddx = cx - ox, ddy = cy - oy, len = Math.sqrt(ddx*ddx + ddy*ddy);
-      if(len > 4) {
-        const clamp = Math.min(len, DRAG_MAX);
-        const ex = ox + ddx/len * clamp, ey = oy + ddy/len * clamp;
-        ctx.strokeStyle = "#555";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 3]);
-        ctx.beginPath();
-        ctx.moveTo(ox, oy);
-        ctx.lineTo(ex, ey);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        const {vx, vy} = dragToVelocity(ddx, ddy);
-        const pts = simTraj(ox, oy, vx, vy);
-        ctx.strokeStyle = TEAM_COLOR[g.turn] + "bb";
-        ctx.lineWidth = 2.5;
-        ctx.setLineDash([7, 5]);
-        ctx.beginPath();
-        pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-        ctx.stroke();
-        ctx.setLineDash([]);
-        const col = checkLog(pts);
-        if(col.hit) {
-          ctx.beginPath();
-          ctx.arc(col.hx, col.hy, 7, 0, Math.PI*2);
-          ctx.fillStyle = "#22c55ecc";
-          ctx.fill();
-          ctx.strokeStyle = "#fff";
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          
-          if(g.gameMode === "practice") {
-            const bouncePts = bounceFromLog(col.hx, col.hy, col.vx, col.vy, true);
-            ctx.strokeStyle = "#ff0000";
-            ctx.lineWidth = 3;
-            ctx.setLineDash([5, 5]);
-            ctx.beginPath();
-            bouncePts.forEach((pt, i) => {
-              if(i === 0) ctx.moveTo(pt.x, pt.y);
-              else ctx.lineTo(pt.x, pt.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          }
-        }
-        const pct = clamp / DRAG_MAX;
-        ctx.fillStyle = "#0003";
-        ctx.fillRect(10, CH - 28, CW - 20, 12);
-        ctx.fillStyle = `hsl(${120 - pct*120}, 75%, 45%)`;
-        ctx.fillRect(10, CH - 28, (CW - 20)*pct, 12);
-        ctx.strokeStyle = "#888";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(10, CH - 28, CW - 20, 12);
-        ctx.fillStyle = "#222";
-        ctx.font = "10px sans-serif";
-        ctx.textAlign = "left";
-        ctx.fillText(`パワー ${Math.round(pct*100)}%`, 12, CH - 32);
-      }
-    }
-
-    if(g.phase === "throwing" && !throwing) {
-      [0, 1, 2].forEach(i => {
-        const py = playerY(i), isActive = i === gRef.current.playerIdx;
-        const isAI = mode === "ai" && gRef.current.turn === 1;
-        const r = isActive ? 20 : 14;
-        ctx.beginPath();
-        ctx.ellipse(THROW_X, py + r*0.4, r*0.8, r*0.3, 0, 0, Math.PI*2);
-        ctx.fillStyle = "#0002";
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(THROW_X, py, r, 0, Math.PI*2);
-        ctx.fillStyle = isActive ? TEAM_COLOR[g.turn] + "55" : "#ccc4";
-        ctx.fill();
-        ctx.strokeStyle = isActive ? TEAM_COLOR[g.turn] : "#bbb";
-        ctx.lineWidth = isActive ? 2.5 : 1.5;
-        ctx.setLineDash(isActive && !drag ? [4, 3] : []);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = isActive ? TEAM_COLOR[g.turn] : "#888";
-        ctx.font = `${isActive ? "bold " : ""}${isActive ? 12 : 10}px sans-serif`;
-        ctx.textAlign = "center";
-        ctx.fillText(`P${i+1}`, THROW_X, py + 4);
-      });
-      if(!drag) {
-        ctx.fillStyle = TEAM_COLOR[g.gameMode === "challenge" ? 0 : g.turn] + "cc";
-        ctx.font = "10px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("← 引いて離す", THROW_X, playerY(2) + 40);
-      }
-    }
-  }, [g, drag, throwing, anim, mode]);
+    drawBackground(ctx);
+    drawField(ctx);
+    drawZones(ctx);
+    drawLog(ctx);
+    if(gameState.roundMarkers) drawRoundMarkers(ctx, gameState.roundMarkers);
+    if(animState.anim) drawProjectile(ctx, animState.anim);
+    drawDragPreview(ctx, inputState, gameState, animState);
+    drawPlayers(ctx, gameState, animState, inputState, mode);
+  }, [gameState, animState, inputState, mode]);
 
   const getPos = (e) => {
     const cvs = canvasRef.current, rect = cvs.getBoundingClientRect();
@@ -529,135 +836,250 @@ function App() {
     const src = e.touches ? e.touches[0] : e;
     return {x:(src.clientX - rect.left)*sx, y:(src.clientY - rect.top)*sy};
   };
-  const activePY = () => playerY(gRef.current.playerIdx);
+  const activePY = () => playerY(gameState.playerIdx);
 
   const onDown = useCallback((e) => {
-    if(throwing || gRef.current.phase !== "throwing") return;
-    if(modeRef.current === "ai" && gRef.current.turn === 1) return;
+    if(animState.isThrowing || gameState.phase !== "throwing") return;
+    if(mode === "ai" && gameState.turn === 1) return;
     e.preventDefault();
     const {x, y} = getPos(e);
     if(Math.sqrt((x - THROW_X)**2 + (y - activePY())**2) > 34) return;
-    setDrag({ox:THROW_X, oy:activePY(), cx:x, cy:y});
-  }, [throwing]);
+    setInputState({ox:THROW_X, oy:activePY(), cx:x, cy:y});
+  }, [animState.isThrowing, gameState.phase, gameState.turn, gameState.playerIdx, mode]);
 
   const onMove = useCallback((e) => {
-    if(!drag) return;
+    if(!inputState.ox) return;
     e.preventDefault();
     const {x, y} = getPos(e);
-    setDrag(d => ({...d, cx:x, cy:y}));
-  }, [drag]);
+    setInputState(prev => ({...prev, cx:x, cy:y}));
+  }, [inputState.ox]);
 
   const onUp = useCallback((e) => {
-    if(!drag || throwing) return;
+    if(!inputState.ox || animState.isThrowing) return;
     e.preventDefault();
-    const {ox, oy, cx, cy} = drag;
-    setDrag(null);
+    const {ox, oy, cx, cy} = inputState;
+    setInputState({ox: null, oy: null, cx: null, cy: null});
     const dx = cx - ox, dy = cy - oy, len = Math.sqrt(dx*dx + dy*dy);
-    if(len < 6) return;
+    if(len < THROW_PARAMS.MIN_DRAG_LEN) return;
     const {vx, vy, power} = dragToVelocity(dx, dy);
-    if(power < 0.05) return;
+    if(power < THROW_PARAMS.MIN_POWER) return;
     executeThrow(ox, oy, vx, vy);
-  }, [drag, throwing]);
+  }, [inputState, animState.isThrowing, executeThrow]);
 
   useEffect(() => () => cancelAnimationFrame(animRef.current), []);
 
   const TEAM_NAME = mode === "ai" ? TEAM_NAME_AI : TEAM_NAME_PVP;
-  const total = (t) => g.scores[t].reduce((a, b) => a + b, 0);
+  const total = (t) => gameState.scores[t].reduce((a, b) => a + b, 0);
   const winner = () => {
     const a = total(0), b = total(1);
     return a > b ? `${TEAM_NAME[0]} の勝利！` : b > a ? `${TEAM_NAME[1]} の勝利！` : "引き分け";
   };
 
-  const startGame = (m) => { 
-    setMode(m);
-    if(m === "challenge") {
-      setG(initGame("challenge", challengeRecord));
-    } else {
-      setG(initGame());
-    }
-    setLastResult(null); 
-  };
+  const startGame = useCallback((m) => { 
+    if(m === "challenge") { setMode("challenge"); setReplayState({isReplaying: false, lastThrowData: null}); dispatchGame({type: "INIT_GAME", payload: {gameMode: "challenge"}}); }
+    else if(m === "practice") { setMode("practice"); setReplayState({isReplaying: false, lastThrowData: null}); dispatchGame({type: "INIT_GAME", payload: {gameMode: "practice"}}); }
+    else { setMode(m); setReplayState({isReplaying: false, lastThrowData: null}); dispatchGame({type: "INIT_GAME", payload: {gameMode: m, customMaxRounds: customRounds}}); }
+  }, [customRounds]);
 
-  const getRank = (score) => {
-    if(score >= 25) return { rank: "S", color: "#FFD700" };
-    if(score >= 20) return { rank: "A", color: "#FF6B6B" };
-    if(score >= 15) return { rank: "B", color: "#FFC107" };
-    if(score >= 10) return { rank: "C", color: "#2196F3" };
-    if(score >= 5) return { rank: "D", color: "#9E9E9E" };
-    return { rank: "D", color: "#AAAAAA" };
-  };
-
-  if(!mode) return (
-    <div style={{fontFamily:"'Hiragino Sans','Meiryo',sans-serif",background:"#344e30",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
-      <h2 style={{color:"#e0e0e0",letterSpacing:3,fontSize:28,margin:0}}>クルドゥガ</h2>
-      <p style={{color:"#ffffff",fontSize:12,margin:0}}>参考：公式ルール</p>
-      <div style={{display:"flex",gap:16,marginTop:16,flexDirection:"column",alignItems:"center"}}>
-        <div style={{display:"flex",gap:16}}>
-          <button onClick={() => startGame("pvp")}
-            style={{padding:"18px 36px",background:"#6092ff",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #1d4ed844"}}>
-            対戦
-          </button>
-          <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
-            <button onClick={() => startGame("ai")}
-              style={{padding:"18px 36px",background:"#b45309",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #b4530944"}}>
-              AI対戦
-            </button>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{color:"#aaa",fontSize:11}}>易</span>
-              <input type="range" min="0" max="1" step="0.1" value={aiDiff}
-                onChange={(e) => setAiDiff(parseFloat(e.target.value))}
-                style={{width:100,accentColor:"#f59e0b"}}/>
-              <span style={{color:"#aaa",fontSize:11}}>難</span>
-              <span style={{color:"#f59e0b",fontSize:11,fontWeight:"bold"}}>{aiDiff<=0.3?"かんたん":aiDiff<=0.6?"ふつう":"むずかしい"}</span>
+  if(showStats) {
+    return (
+      <div style={{fontFamily:"system-ui,sans-serif",background:"linear-gradient(135deg,#020042 0%, #0026b4 100%)",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:24,padding:24}}>
+        <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16,width:"100%",maxWidth:900,justifyContent:"space-between"}}>
+          <h2 style={{color:"#fff",margin:0,letterSpacing:1,fontSize:28,fontWeight:"300"}}>統計</h2>
+          <button onClick={() => setShowStats(false)} style={{padding:"10px 20px",background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,fontSize:13,cursor:"pointer",fontWeight:"400",backdropFilter:"blur(8px)"}}>戻る</button>
+        </div>
+        <div style={{width:"100%",maxWidth:900,display:"flex",flexDirection:"column",gap:16,overflowY:"auto",maxHeight:"75vh"}}>
+          {overallStats && overallStats.gameCount > 0 && (
+            <div style={{background:"rgba(255,255,255,0.1)",borderRadius:12,padding:"20px",boxShadow:"0 4px 16px rgba(0,0,0,0.2)",border:"1px solid rgba(255,255,255,0.2)",backdropFilter:"blur(8px)"}}>
+              <h3 style={{color:"#fff",fontSize:14,margin:"0 0 14px 0",fontWeight:"500",letterSpacing:0.5}}>チャレンジ統計</h3>
+              <div style={{color:"#fff",fontSize:13,lineHeight:2}}>
+                <div>総投数: <span style={{color:"#ffd700",fontWeight:"500"}}>{overallStats.totalThrows || 0}投</span></div>
+                <div>丸太命中: <span style={{color:"#ffd700",fontWeight:"500"}}>{overallStats.totalHits || 0}回</span> {(overallStats.totalThrows || 0) > 0 && <span style={{color:"#fff"}}>({(((overallStats.totalHits || 0)/(overallStats.totalThrows || 1))*100).toFixed(1)}%)</span>}</div>
+                <div>獲得点数: <span style={{color:"#ffd700",fontWeight:"500"}}>{overallStats.totalPoints || 0}点</span></div>
+                <div>ゲーム数: <span style={{color:"#ffd700",fontWeight:"500"}}>{overallStats.gameCount || 0}回</span></div>
+                <div style={{color:"#fff",fontSize:11,marginTop:12,borderTop:"1px solid rgba(255,255,255,0.2)",paddingTop:12}}>ゾーン別: 1pt {overallStats.zoneHits && overallStats.zoneHits[0] ? overallStats.zoneHits[0] : 0} | 2pt {overallStats.zoneHits && overallStats.zoneHits[1] ? overallStats.zoneHits[1] : 0} | 3pt {overallStats.zoneHits && overallStats.zoneHits[2] ? overallStats.zoneHits[2] : 0}</div>
+              </div>
             </div>
+          )}
+          {scores && scores.length > 0 && (
+            <div style={{background:"rgba(255,255,255,0.1)",borderRadius:12,padding:"20px",boxShadow:"0 4px 16px rgba(0,0,0,0.2)",border:"1px solid rgba(255,255,255,0.2)",backdropFilter:"blur(8px)"}}>
+              <h3 style={{color:"#fff",fontSize:14,margin:"0 0 14px 0",fontWeight:"500",letterSpacing:0.5}}>どこまでチャレンジ ランキング</h3>
+              {scores.map((s, i) => (
+                <div key={i} style={{color:"#fff",fontSize:12,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.1)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div><span style={{color:"#ffd700",fontWeight:"500",fontSize:13}}>#{i+1}</span> <span style={{fontSize:13,fontWeight:"500",color:"#fff"}}>{s.score}点</span> (連続{s.streak}投)</div>
+                  <span style={{color:"#fff",fontSize:11}}>{s.date}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {realChallengeScores && realChallengeScores.length > 0 && (
+            <div style={{background:"rgba(255,255,255,0.1)",borderRadius:12,padding:"20px",boxShadow:"0 4px 16px rgba(0,0,0,0.2)",border:"1px solid rgba(255,255,255,0.2)",backdropFilter:"blur(8px)"}}>
+              <h3 style={{color:"#fff",fontSize:14,margin:"0 0 14px 0",fontWeight:"500",letterSpacing:0.5}}>ほんとうにチャレンジ ランキング</h3>
+              {realChallengeScores.map((s, i) => (
+                <div key={i} style={{color:"#fff",fontSize:12,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.1)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div><span style={{color:"#ff0000",fontWeight:"500",fontSize:13}}>#{i+1}</span> <span style={{fontSize:13,fontWeight:"500",color:"#fff"}}>{s.score}点</span> (連続{s.streak}投)</div>
+                  <span style={{color:"#fff",fontSize:11}}>{s.date}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {(!overallStats || overallStats.gameCount === 0) && (!scores || scores.length === 0) && (!realChallengeScores || realChallengeScores.length === 0) && (
+            <div style={{color:"#fff",fontSize:14,textAlign:"center",padding:50}}>統計データがまだありません</div>
+          )}
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            {overallStats && overallStats.gameCount > 0 && <button onClick={() => resetStats()} style={{flex:1,padding:"10px",background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,fontSize:12,cursor:"pointer",fontWeight:"400"}}>統計リセット</button>}
+            {scores && scores.length > 0 && <button onClick={() => resetScores()} style={{flex:1,padding:"10px",background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,fontSize:12,cursor:"pointer",fontWeight:"400"}}>どこまでランキングリセット</button>}
+            {realChallengeScores && realChallengeScores.length > 0 && <button onClick={() => resetRealChallengeScores()} style={{flex:1,padding:"10px",background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,fontSize:12,cursor:"pointer",fontWeight:"400"}}>ほんとうにランキングリセット</button>}
           </div>
         </div>
-        <div style={{display:"flex",gap:16}}>
-          <button onClick={() => startGame("challenge")}
-            style={{padding:"18px 36px",background:"#10b981",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #10b98144"}}>
-            どこまでチャレンジ
-          </button>
-          <button onClick={() => { setMode("practice"); setG(initGame("practice")); setLastResult(null); }}
-            style={{padding:"18px 36px",background:"#8b5cf6",color:"#fff",border:"none",borderRadius:14,fontSize:16,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 16px #8b5cf644"}}>
-            練習モード
-          </button>
+      </div>
+    );
+  }
+
+  if(showShotManager) {
+    return (
+      <div style={{fontFamily:"system-ui,sans-serif",background:"linear-gradient(135deg,#020042 0%, #0026b4 100%)",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:24,padding:24}}>
+        <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16,width:"100%",maxWidth:900,justifyContent:"space-between"}}>
+          <h2 style={{color:"#fff",margin:0,letterSpacing:1,fontSize:28,fontWeight:"300"}}>ショット管理</h2>
+          <button onClick={() => setShowShotManager(false)} style={{padding:"10px 20px",background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,fontSize:13,cursor:"pointer",fontWeight:"400",backdropFilter:"blur(8px)"}}>戻る</button>
+        </div>
+        <div style={{width:"100%",maxWidth:900,display:"flex",flexDirection:"column",gap:16,overflowY:"auto",maxHeight:"75vh"}}>
+          {shots && shots.length > 0 ? (
+            <>
+              <div style={{color:"#fff",fontSize:12,paddingBottom:10,borderBottom:"1px solid rgba(255,255,255,0.2)"}}>
+                保存済みショット: {shots.length}/25
+              </div>
+              {shots.map((shot, i) => {
+                const date = new Date(shot.timestamp);
+                const dateStr = date.toLocaleDateString('ja-JP');
+                const timeStr = date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                return (
+                  <div key={i} style={{background:"rgba(255,255,255,0.1)",borderRadius:12,padding:"16px",border:"1px solid rgba(255,255,255,0.2)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{flex:1}}>
+                      <div style={{color:"#fff",fontSize:13,fontWeight:"500",marginBottom:6}}>
+                        <span style={{color: shot.isSuccess ? "#4ade80" : "#ff6b6b", fontWeight:"bold", marginRight:10}}>
+                          {shot.isSuccess ? "✓ 成功" : "✗ 失敗"}
+                        </span>
+                        {shot.result.pts}点
+                      </div>
+                      <div style={{color:"#aaa",fontSize:11}}>
+                        {dateStr} {timeStr}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:10}}>
+                      <button onClick={() => {
+                        setShowShotManager(false);
+                        setTimeout(() => {
+                          const fullPts = shot.pts;
+                          setAnimState(prev => ({...prev, isThrowing: true, anim: {pts: fullPts, idx: 0}}));
+                          let idx = 0;
+                          const tick = () => {
+                            idx += 3;
+                            if(idx >= fullPts.length) {
+                              setAnimState(prev => ({...prev, isThrowing: false, anim: null}));
+                              return;
+                            }
+                            setAnimState(prev => ({...prev, anim: prev.anim ? {...prev.anim, idx} : null}));
+                            animRef.current = requestAnimationFrame(tick);
+                          };
+                          animRef.current = requestAnimationFrame(tick);
+                        }, 100);
+                      }} style={{padding:"8px 16px",background:"rgba(0,212,255,0.3)",color:"#00d4ff",border:"1px solid rgba(0,212,255,0.5)",borderRadius:8,fontSize:11,fontWeight:"500",cursor:"pointer"}}>
+                        再生
+                      </button>
+                      <button onClick={() => deleteShot(i)} style={{padding:"8px 16px",background:"rgba(255,107,157,0.3)",color:"#ff6b9d",border:"1px solid rgba(255,107,157,0.5)",borderRadius:8,fontSize:11,fontWeight:"500",cursor:"pointer"}}>
+                        削除
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          ) : (
+            <div style={{color:"#fff",fontSize:14,textAlign:"center",padding:50}}>
+              保存済みショットがありません
+            </div>
+          )}
         </div>
       </div>
-      
-      {scores.length > 0 && (
-        <div style={{marginTop:20,background:"#1a1a1a",borderRadius:10,padding:"12px 16px",maxWidth:400}}>
-          <div style={{color:"#10b981",fontSize:12,marginBottom:8,fontWeight:"bold"}}>チャレンジ ハイスコア Top 5</div>
-          {scores.slice(0, 5).map((s, i) => (
-            <div key={i} style={{color:"#ccc",fontSize:11,marginBottom:4,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span>#{i+1} <span style={{color:"#10b981",fontWeight:"bold"}}>{s.score}点</span> (連続{s.streak}投)</span>
-              <span style={{color:"#888",fontSize:10}}>{s.date}</span>
-            </div>
-          ))}
+    );
+  }
+
+  if(gameState.gameMode === "normal" && !mode && !showShotManager && !showStats) {
+    return (
+      <div style={{fontFamily:"system-ui,sans-serif",background:"linear-gradient(135deg,#020042 0%, #0026b4 100%)",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:24,padding:24}}>
+        <div style={{textAlign:"center"}}>
+          <h1 style={{color:"#fff",letterSpacing:3,fontSize:56,margin:"0 0 4px 0",fontWeight:"300"}}>クルドゥガ</h1>
+          <p style={{color:"#fff",fontSize:13,margin:0,marginBottom:36,fontWeight:"400",letterSpacing:1}}>ナウルの伝統的スポーツ</p>
         </div>
-      )}
-    </div>
-  );
+        <div style={{display:"flex",gap:16,flexDirection:"column",alignItems:"center",width:"100%",maxWidth:640}}>
+          <div style={{display:"flex",gap:14,width:"100%"}}>
+            <button onClick={() => startGame("pvp")} style={{flex:1,padding:"20px",background:"linear-gradient(135deg, rgba(255,107,157,0.25) 0%, rgba(255,20,147,0.25) 100%)",color:"#fff",border:"1px solid rgba(255,107,157,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",transition:"all 0.2s",backdropFilter:"blur(8px)"}}>対戦</button>
+            <div style={{display:"flex",flexDirection:"column",gap:10,flex:1}}>
+              <button onClick={() => startGame("ai")} style={{width:"100%",padding:"20px",background:"linear-gradient(135deg, rgba(0,212,255,0.25) 0%, rgba(0,150,200,0.25) 100%)",color:"#fff",border:"1px solid rgba(0,212,255,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>AI対戦</button>
+              <div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"center",background:"rgba(255,255,255,0.1)",padding:"10px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",backdropFilter:"blur(8px)"}}>
+                <span style={{color:"#fff",fontSize:11,fontWeight:"500"}}>易</span>
+                <input type="range" min="0" max="1" step="0.1" value={aiDiff} onChange={(e) => setAiDiff(parseFloat(e.target.value))} style={{width:80,accentColor:"#ffd700",height:4}}/>
+                <span style={{color:"#fff",fontSize:11,fontWeight:"500"}}>難</span>
+                <span style={{color:"#fff",fontSize:11,fontWeight:"500",minWidth:50}}>{aiDiff<=0.3?"かんたん":aiDiff<=0.6?"ふつう":"むずかしい"}</span>
+              </div>
+            </div>
+          </div>
+          <div style={{width:"100%",display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:"rgba(255,255,255,0.1)",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",backdropFilter:"blur(8px)"}}>
+            <span style={{color:"#fff",fontSize:12,fontWeight:"500",minWidth:60}}>ラウンド数</span>
+            <input type="range" min="1" max="5" step="1" value={customRounds} onChange={(e) => setCustomRounds(parseInt(e.target.value))} style={{flex:1,accentColor:"#ffd700",height:4}}/>
+            <span style={{color:"#fff",fontSize:15,fontWeight:"500",minWidth:40}}>{customRounds}R</span>
+          </div>
+          <div style={{display:"flex",gap:14,width:"100%"}}>
+            <button onClick={() => startGame("challenge")} style={{flex:1,padding:"20px",background:"linear-gradient(135deg, rgba(255,215,0,0.25) 0%, rgba(255,165,0,0.25) 100%)",color:"#fff",border:"1px solid rgba(255,215,0,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>どこまで<br/>チャレンジ</button>
+            <button onClick={() => setMode("realChallengeConfirm")} style={{flex:1,padding:"20px",background:"linear-gradient(135deg, rgba(255,0,0,0.25) 0%, rgba(220,20,60,0.25) 100%)",color:"#fff",border:"1px solid rgba(255,0,0,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>ほんとうに<br/>チャレンジ？</button>
+            <button onClick={() => startGame("practice")} style={{flex:1,padding:"20px",background:"linear-gradient(135deg, rgba(76,175,80,0.25) 0%, rgba(56,142,60,0.25) 100%)",color:"#fff",border:"1px solid rgba(76,175,80,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>練習<br/>モード</button>
+          </div>
+          {(scores.length > 0 || overallStats.gameCount > 0) && <button onClick={() => setShowStats(true)} style={{width:"100%",padding:"14px",background:"linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.1) 100%)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:12,fontSize:14,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>統計を見る</button>}
+          {shots.length > 0 && <button onClick={() => setShowShotManager(true)} style={{width:"100%",padding:"14px",background:"linear-gradient(135deg, rgba(100,200,255,0.15) 0%, rgba(100,150,255,0.1) 100%)",color:"#64c8ff",border:"1px solid rgba(100,200,255,0.3)",borderRadius:12,fontSize:14,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>ショット管理 ({shots.length}/25)</button>}
+        </div>
+      </div>
+    );
+  }
+
+  if(mode === "realChallengeConfirm") {
+    return (
+      <div style={{fontFamily:"system-ui,sans-serif",background:"linear-gradient(135deg,#020042 0%, #0026b4 100%)",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:24,padding:24}}>
+        <div style={{textAlign:"center"}}>
+          <h1 style={{color:"#ff0000",letterSpacing:3,fontSize:48,margin:"0 0 16px 0",fontWeight:"bold"}}>ほんとうに？</h1>
+          <p style={{color:"#fff",fontSize:16,margin:0,marginBottom:36,fontWeight:"400",letterSpacing:1,lineHeight:1.8}}>このモードでは<br/>放物線の予想線が表示されません<br/>本気のチャレンジです</p>
+        </div>
+        <div style={{display:"flex",gap:16,flexDirection:"column",alignItems:"center",width:"100%",maxWidth:400}}>
+          <button onClick={() => {setMode("realChallenge");dispatchGame({type: "INIT_GAME", payload: {gameMode: "realChallenge"}});setReplayState({isReplaying: false, lastThrowData: null});}} style={{width:"100%",padding:"20px",background:"linear-gradient(135deg, rgba(255,0,0,0.4) 0%, rgba(220,20,60,0.4) 100%)",color:"#fff",border:"2px solid rgba(255,0,0,0.6)",borderRadius:12,fontSize:18,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>本気でチャレンジする</button>
+          <button onClick={() => {setMode(null);}} style={{width:"100%",padding:"20px",background:"linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.1) 100%)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>メニューに戻る</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={{fontFamily:"'Hiragino Sans','Meiryo',sans-serif",background:"#344e30",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",padding:14}}>
+    <div style={{fontFamily:"system-ui,sans-serif",background:"linear-gradient(135deg, #020042 0%, #0026b4 100%)",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",padding:14}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
-        <h2 style={{color:"#e0e0e0",margin:0,letterSpacing:2}}>クルドゥガ</h2>
-        {mode==="ai"&&<span style={{background:"#b45309",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>AI対戦</span>}
-        {mode==="pvp"&&<span style={{background:"#6092ff",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>対戦</span>}
-        <button onClick={() => {setMode(null);setG(initGame());}} style={{padding:"3px 10px",background:"#333",color:"#aaa",border:"none",borderRadius:6,fontSize:11,cursor:"pointer"}}>メニュー</button>
+        <h2 style={{color:"#fff",margin:0,letterSpacing:2}}>クルドゥガ</h2>
+        {mode==="ai"&&<span style={{background:"#ff6b9d",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>AI対戦</span>}
+        {mode==="pvp"&&<span style={{background:"#00d4ff",color:"#333",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>対戦</span>}
+        {mode==="challenge"&&<span style={{background:"#ffd700",color:"#333",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>チャレンジ</span>}
+        {mode==="realChallenge"&&<span style={{background:"#ff0000",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>本気チャレンジ</span>}
+        {mode==="practice"&&<span style={{background:"#af4c4c",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>練習</span>}
+        <button onClick={() => {setMode(null);setReplayState({isReplaying: false, lastThrowData: null});dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});setCustomRounds(ROUNDS_MAX);}} style={{padding:"3px 10px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:6,fontSize:11,cursor:"pointer"}}>メニュー</button>
       </div>
 
       <div style={{display:"flex",gap:10,marginBottom:8,width:"100%",maxWidth:CW}}>
-        {g.gameMode === "challenge" ? (
-          <div style={{flex:1,background:"#d4f4e4",borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
-            <div style={{fontWeight:"bold",color:"#10b981",fontSize:12}}>チャレンジ</div>
-            <div style={{fontSize:22,fontWeight:"bold",color:"#10b981"}}>{g.score}<span style={{fontSize:11}}>点</span></div>
-            <div style={{fontSize:10,color:"#666"}}>連続成功: {g.streak} / 最高記録: {g.maxStreak}</div>
+        {gameState.gameMode === "challenge" || gameState.gameMode === "realChallenge" ? (
+          <div style={{flex:1,background:"#fff5e6",borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
+            <div style={{fontWeight:"bold",color:"#ff9800",fontSize:12}}>{gameState.gameMode === "realChallenge" ? "本気チャレンジ" : "チャレンジ"}</div>
+            <div style={{fontSize:22,fontWeight:"bold",color:"#ff9800"}}>{gameState.score}<span style={{fontSize:11}}>点</span></div>
+            <div style={{fontSize:10,color:"#666"}}>連続成功: {gameState.streak} / 最高記録: {gameState.maxStreak}</div>
           </div>
-        ) : g.gameMode === "practice" ? (
-          <div style={{flex:1,background:"#f3e8ff",borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
-            <div style={{fontWeight:"bold",color:"#8b5cf6",fontSize:12}}>練習モード</div>
-            <div style={{fontSize:22,fontWeight:"bold",color:"#8b5cf6"}}>{g.round-1}<span style={{fontSize:11}}>投</span></div>
+        ) : gameState.gameMode === "practice" ? (
+          <div style={{flex:1,background:"#e8f5e9",borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
+            <div style={{fontWeight:"bold",color:"#af4c4c",fontSize:12}}>練習モード</div>
+            <div style={{fontSize:22,fontWeight:"bold",color:"#af4c4c"}}>{gameState.round-1}<span style={{fontSize:11}}>投</span></div>
             <div style={{fontSize:10,color:"#666"}}>軌道を確認できます</div>
           </div>
         ) : (
@@ -668,8 +1090,8 @@ function App() {
               </div>
               <div style={{fontSize:22,fontWeight:"bold",color:TEAM_COLOR[t]}}>{total(t)}<span style={{fontSize:11}}>点</span></div>
               <div style={{fontSize:10,color:"#666"}}>
-                {Array.from({length:g.maxRounds}, (_,i) => (
-                  <span key={i} style={{marginRight:4,color:i<g.round-1?TEAM_COLOR[t]:"#bbb"}}>R{i+1}:{g.scores[t][i]??0}</span>
+                {Array.from({length:gameState.maxRounds}, (_,i) => (
+                  <span key={i} style={{marginRight:4,color:i<gameState.round-1?TEAM_COLOR[t]:"#bbb"}}>R{i+1}:{gameState.scores[t][i]??0}</span>
                 ))}
               </div>
             </div>
@@ -677,97 +1099,75 @@ function App() {
         )}
       </div>
 
-      <div style={{fontSize:12,color:"#aaa",marginBottom:6,textAlign:"center"}}>
-        {g.gameMode === "challenge" ? (
-          <>投{g.round}目</>
-        ) : (
-          <>R{g.round}{g.round>ROUNDS_MAX?"（延長）":""} — <span style={{color:TEAM_COLOR[g.turn],fontWeight:"bold"}}>{TEAM_NAME[g.turn]} P{g.playerIdx+1} の番</span></>
-        )}
+      <div style={{fontSize:12,color:"#fff",marginBottom:6,textAlign:"center"}}>
+        {gameState.gameMode === "challenge" || gameState.gameMode === "realChallenge" ? <span>投{gameState.round}目</span> : <span>R{gameState.round}{gameState.round>ROUNDS_MAX?"（延長）":""} — <span style={{color:TEAM_COLOR[gameState.turn],fontWeight:"bold"}}>{TEAM_NAME[gameState.turn]} P{gameState.playerIdx+1} の番</span></span>}
       </div>
 
       <div style={{position:"relative",width:"100%",maxWidth:CW}}>
         <canvas ref={canvasRef} width={CW} height={CH}
-          style={{display:"block",width:"100%",borderRadius:12,cursor:g.phase==="throwing"&&!throwing&&!(mode==="ai"&&g.turn===1)?"crosshair":"default",touchAction:"none",boxShadow:"0 4px 20px #0009"}}
+          style={{display:"block",width:"100%",borderRadius:12,cursor:gameState.phase==="throwing"&&!animState.isThrowing&&!(mode==="ai"&&gameState.turn===1)?"crosshair":"default",touchAction:"none",boxShadow:"0 4px 20px rgba(0,0,0,0.3)"}}
           onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
           onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
         />
-        {lastResult&&!throwing&&g.phase==="throwing"&&(
-          <div style={{position:"absolute",top:8,left:"50%",transform:"translateX(-50%)",
-            background:lastResult.inZone?"#166534ee":lastResult.hitMarutai?"#92400eee":"#7f1d1dee",
-            color:"#fff",borderRadius:8,padding:"5px 18px",fontSize:13,fontWeight:"bold",pointerEvents:"none",whiteSpace:"nowrap"}}>
-            {!lastResult.hitMarutai&&"外れ — 丸太に当たらず"}
-            {lastResult.hitMarutai&&lastResult.inZone&&`丸太命中！ → ${lastResult.pts}点`}
-            {lastResult.hitMarutai&&!lastResult.inZone&&"丸太命中 → ゾーン外 (0点)"}
+        {animState.lastResult&&!animState.isThrowing&&gameState.phase==="throwing"&&(
+          <div style={{position:"absolute",top:8,left:"50%",transform:"translateX(-50%)",background:animState.lastResult.inZone?"#af4c4cdd":animState.lastResult.hitMarutai?"#ff9800dd":"#ff1493dd",color:"#fff",borderRadius:8,padding:"5px 18px",fontSize:13,fontWeight:"bold",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:12}}>
+            <span>{!animState.lastResult.hitMarutai&&"外れ — 丸太に当たらず"}{animState.lastResult.hitMarutai&&animState.lastResult.inZone&&`丸太命中！ → ${animState.lastResult.pts}点`}{animState.lastResult.hitMarutai&&!animState.lastResult.inZone&&"丸太命中 → ゾーン外 (0点)"}</span>
+            {!replayState.isReplaying && replayState.lastThrowData && <button onClick={playReplay} style={{padding:"2px 10px",background:"rgba(255,255,255,0.3)",color:"#fff",border:"1px solid #fff",borderRadius:6,fontSize:11,fontWeight:"bold",cursor:"pointer",whiteSpace:"nowrap",pointerEvents:"auto"}}>リプレイ</button>}
           </div>
         )}
-        {g.phase==="roundEnd"&&(
-          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:"#0007",borderRadius:12}}>
-            <button onClick={() => {setLastResult(null);setG(p => ({...p,phase:"throwing"}));}}
-              style={{padding:"12px 28px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:"bold",cursor:"pointer"}}>
-              次のラウンドへ
-            </button>
+        {gameState.phase === "roundEnd" && (
+          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.5)",borderRadius:12}}>
+            <button onClick={() => dispatchGame({type:"NEXT_ROUND"})} style={{padding:"12px 28px",background:"#ffd700",color:"#333",border:"none",borderRadius:10,fontSize:15,fontWeight:"bold",cursor:"pointer"}}>次のラウンドへ</button>
           </div>
         )}
-        {g.phase==="gameEnd"&&(
-          <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#000b",borderRadius:12}}>
-            {g.gameMode === "practice" ? (
-              <>
-                <div style={{fontSize:22,fontWeight:"bold",color:"#8b5cf6",marginBottom:10}}>練習終了</div>
-                <div style={{color:"#ccc",fontSize:14,marginBottom:16}}>
-                  総投数: {g.round - 1}投
-                </div>
-              </>
-            ) : g.gameMode === "challenge" ? (
-              <>
-                <div style={{fontSize:22,fontWeight:"bold",color:"#10b981",marginBottom:10}}>ゲームオーバー</div>
-                <div style={{color:"#ccc",fontSize:14,marginBottom:16}}>
-                  最終スコア: {g.score}点<br/>
-                  最高連続成功: {g.maxStreak}投<br/>
-                  <span style={{fontSize:12, color: "#ccc"}}>
-                    記録をTwitter（現X）に投稿しよう！！
-                  </span>
-                </div>
-                <button onClick={() => {
-                  const rankInfo = getRank(g.score);
-                  const text = `クルドゥガでチャレンジ！\n${rankInfo.rank} ランク\n最終スコア: ${g.score}点\n最高連続成功: ${g.maxStreak}投\n#クルドゥガ\n#気にナウル`;
-                  const url = encodeURIComponent("\nhttps://dayu-otya.github.io/KRDG/");
-                  const tweetText = encodeURIComponent(text);
-                  window.open(`https://twitter.com/intent/tweet?text=${tweetText}&url=${url}`, '_blank');
-                }}
-                  style={{padding:"8px 16px",background:"#1DA1F2",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer",marginBottom:10}}>
-                  Xで投稿する
-                </button>
-              </>
-            ) : (
-              <>
-                <div style={{fontSize:22,fontWeight:"bold",color:"#fbbf24",marginBottom:10}}>{winner()}</div>
-                <div style={{color:"#ccc",fontSize:14,marginBottom:16}}>あなた: {total(0)}点 / {mode==="ai"?"AI":"相手"}: {total(1)}点</div>
-              </>
-            )}
-            <div style={{display:"flex",gap:10}}>
-              <button onClick={() => {setLastResult(null);setG(g.gameMode === "challenge" ? initGame("challenge", challengeRecord) : g.gameMode === "practice" ? initGame("practice") : initGame());}}
-                style={{padding:"10px 20px",background:"#f59e0b",color:"#000",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>
-                もう一度
-              </button>
-              <button onClick={() => setMode(null)}
-                style={{padding:"10px 20px",background:"#333",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>
-                メニューへ
-              </button>
+        {gameState.phase==="gameEnd"&&(
+          <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.6)",zIndex:9999}}>
+            <div style={{background:"#1a4d6d",borderRadius:12,padding:"24px",maxWidth:500,width:"90%",boxShadow:"0 8px 32px rgba(0,0,0,0.4)",border:"1px solid rgba(255,255,255,0.2)"}}>
+              {gameState.gameMode === "practice" ? (
+                <>
+                  <div style={{fontSize:22,fontWeight:"bold",color:"#af4c4c",marginBottom:10,textAlign:"center"}}>練習終了</div>
+                  <div style={{color:"#fff",fontSize:13,marginBottom:16,textAlign:"center"}}>練習を終了しました</div>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={() => dispatchGame({type:"INIT_GAME",payload:{gameMode:"practice"}})} style={{flex:1,padding:"10px 20px",background:"#ffd700",color:"#333",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
+                    <button onClick={() => {setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
+                  </div>
+                </>
+              ) : gameState.gameMode === "challenge" || gameState.gameMode === "realChallenge" ? (
+                <>
+                  <div style={{fontSize:22,fontWeight:"bold",color:"#ffd700",marginBottom:10,textAlign:"center"}}>ゲームオーバー</div>
+                  <div style={{color:"#fff",fontSize:13,marginBottom:16,textAlign:"center"}}>
+                    <div>最終スコア: {gameState.score}点</div>
+                    <div>最高連続成功: {gameState.maxStreak}投</div>
+                    <span style={{fontSize:12, color: "#fff",marginTop:8,display:"block"}}>記録をTwitter（現X）に投稿しよう！！</span>
+                  </div>
+                  <button onClick={() => {window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(`クルドゥガでチャレンジ！\n最終スコア: ${gameState.score}点\n最高連続成功: ${gameState.maxStreak}投\n#クルドゥガ\n#気にナウル`)}&url=${encodeURIComponent("\nhttps://dayu-otya.github.io/KRDG/")}`, '_blank');}} style={{width:"100%",padding:"8px 16px",background:"#1DA1F2",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer",marginBottom:10}}>Xで投稿する</button>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={() => {if(gameState.gameMode === "realChallenge"){addRealChallengeScore(gameState.score, gameState.maxStreak);}else{addScore(gameState.score, gameState.maxStreak);}if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}dispatchGame({type:"INIT_GAME",payload:{gameMode:gameState.gameMode}});}} style={{flex:1,padding:"10px 20px",background:"#ffd700",color:"#333",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
+                    <button onClick={() => {if(gameState.gameMode === "realChallenge"){addRealChallengeScore(gameState.score, gameState.maxStreak);}else{addScore(gameState.score, gameState.maxStreak);}if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{fontSize:22,fontWeight:"bold",color:"#ffd700",marginBottom:10,textAlign:"center"}}>{winner()}</div>
+                  <div style={{color:"#fff",fontSize:13,marginBottom:16,textAlign:"center"}}>あなた: {total(0)}点 / {mode==="ai"?"AI":"相手"}: {total(1)}点</div>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={() => {if(gameState.stats && Array.isArray(gameState.stats) && gameState.stats.length > 0 && gameState.stats[0]){addGameStats({totalThrows: (gameState.stats[0].totalThrows || 0) + (gameState.stats[1]?.totalThrows || 0),hitLog: (gameState.stats[0].hitLog || 0) + (gameState.stats[1]?.hitLog || 0),points: (gameState.stats[0].points || 0) + (gameState.stats[1]?.points || 0),zoneHits: gameState.stats[0].zoneHits.map((z, i) => z + (gameState.stats[1]?.zoneHits[i] || 0))});}dispatchGame({type:"INIT_GAME",payload:{gameMode:mode,customMaxRounds:customRounds}});}} style={{flex:1,padding:"10px 20px",background:"#ffd700",color:"#333",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
+                    <button onClick={() => {if(gameState.stats && Array.isArray(gameState.stats) && gameState.stats.length > 0 && gameState.stats[0]){addGameStats({totalThrows: (gameState.stats[0].totalThrows || 0) + (gameState.stats[1]?.totalThrows || 0),hitLog: (gameState.stats[0].hitLog || 0) + (gameState.stats[1]?.hitLog || 0),points: (gameState.stats[0].points || 0) + (gameState.stats[1]?.points || 0),zoneHits: gameState.stats[0].zoneHits.map((z, i) => z + (gameState.stats[1]?.zoneHits[i] || 0))});}setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
       </div>
 
-      <div ref={logRef} style={{width:"100%",maxWidth:CW,marginTop:8,background:"#111",borderRadius:10,padding:"7px 12px",maxHeight:100,overflowY:"auto",fontSize:11,color:"#ccc",lineHeight:1.8}}>
-        <div style={{color:"#444",fontSize:10,marginBottom:2}}>投擲ログ</div>
-        {g.log.map((l, i) => (
-          <div key={i} style={{color:l.includes("──")?"#f59e0b":l.includes("あなた")?"#60a5fa":l.includes("AI")?"#fbbf24":"#ccc"}}>{l}</div>
-        ))}
+      <div ref={logRef} style={{width:"100%",maxWidth:CW,marginTop:8,background:"rgba(0,0,0,0.3)",borderRadius:10,padding:"7px 12px",maxHeight:100,overflowY:"auto",fontSize:11,color:"#fff",lineHeight:1.8}}>
+        <div style={{color:"#fff",fontSize:10,marginBottom:2}}>投擲ログ</div>
+        {gameState.log.map((l, i) => (<div key={i} style={{color:l.includes("──")?"#ffd700":l.includes("あなた")?"#00d4ff":l.includes("AI")?"#ff6b9d":"#fff"}}>{l}</div>))}
       </div>
     </div>
   );
-}
-    const root = ReactDOM.createRoot(document.getElementById('root'));
+}    const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
 </body>
