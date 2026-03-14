@@ -15,22 +15,22 @@ const { useState, useRef, useEffect, useCallback, useReducer, useMemo } = React;
 
 const ROUNDS_MAX = 5;
 const PLAYERS = 3;
-const CW = 760;
-const CH = 420;
+const CW = 874;
+const CH = 483;
 
-const THROW_X = 100;
-const FIELD_TOP = 80;
-const FIELD_BOT = CH - 80;
+const THROW_X = 115;
+const FIELD_TOP = 92;
+const FIELD_BOT = CH - 92;
 const FIELD_MID = (FIELD_TOP + FIELD_BOT) / 2;
 
-const LOG_CX  = 360;
-const LOG_TOP = FIELD_TOP + 20;
-const LOG_BOT = FIELD_BOT - 20;
-const LOG_W   = 65;
-const LOG_RY  = 32;
+const LOG_CX  = 414;
+const LOG_TOP = FIELD_TOP + 23;
+const LOG_BOT = FIELD_BOT - 23;
+const LOG_W   = 75;
+const LOG_RY  = 37;
 
-const ZONE_X     = LOG_CX + LOG_W/2 + 15;
-const ZONE_RIGHT = CW - 40;
+const ZONE_X     = LOG_CX + LOG_W/2 + 17;
+const ZONE_RIGHT = CW - 46;
 const ZONE_W     = (ZONE_RIGHT - ZONE_X) / 3;
 const ZONE_TOP_Y = LOG_TOP + LOG_RY + 2;
 const ZONE_BOT_Y = LOG_BOT - LOG_RY - 2;
@@ -54,9 +54,9 @@ const PHYSICS = {
 
 const THROW_PARAMS = {MIN_DRAG_LEN: 6, MIN_POWER: 0.05, THROW_DELAY_AI: 800};
 const AI_DIFFICULTY = {
-  HARD: {targetY:(t,b)=>t+10, powerPercent:0.30, noiseAmount:0.3, usePrediction:true},
-  NORMAL: {targetY:(t,b)=>t+(b-t)*0.3, powerPercent:0.25, noiseAmount:0.6, usePrediction:true},
-  EASY: {targetY:(t,b)=>(t+b)/2, powerPercent:0.15, noiseAmount:1.0, usePrediction:false},
+  HARD: {targetY:(t,b)=>t+10, powerPercent:0.53, noiseAmount:0.3, usePrediction:true},
+  NORMAL: {targetY:(t,b)=>t+(b-t)*0.3, powerPercent:0.47, noiseAmount:0.6, usePrediction:true},
+  EASY: {targetY:(t,b)=>(t+b)/2, powerPercent:0.36, noiseAmount:1.0, usePrediction:false},
 };
 
 const TEAM_COLOR = ["#00d4ff","#ff6b9d"];
@@ -106,15 +106,15 @@ function bounceFromLog(hx,hy,inVx,inVy, deterministic=false) {
   const angle=Math.atan2(Math.abs(inVy),Math.abs(inVx));
   const goRight=angle<PHYSICS.ANGLE_THRESHOLD;
   const speed=Math.sqrt(inVx*inVx+inVy*inVy);
-  const baseReducedSpeed=speed*PHYSICS.BOUNCE_SPEED_RATIO;
+  const baseReducedSpeed=speed*PHYSICS.BOUNCE_SPEED_RATIO*0.6;
   const randOffset=deterministic ? 0.075 : Math.random()*0.15;
-  const reducedSpeed=baseReducedSpeed + speed*randOffset;
+  const reducedSpeed=baseReducedSpeed + speed*randOffset*0.6;
   const bvxBase=goRight? PHYSICS.BOUNCE_VX_BASE_RIGHT : PHYSICS.BOUNCE_VX_BASE_LEFT;
   const bvxRand=deterministic ? 0.15 : Math.random()*0.3;
-  const bvx=goRight? reducedSpeed*(bvxBase+bvxRand):-reducedSpeed*(bvxBase+bvxRand);
+  const bvx=goRight? reducedSpeed*(bvxBase+bvxRand)*0.65:-reducedSpeed*(bvxBase+bvxRand)*0.65;
   const bvyBase=PHYSICS.BOUNCE_VY_BASE;
   const bvyRand=deterministic ? 0.2 : Math.random()*0.4;
-  const bvy=reducedSpeed*(bvyBase-bvyRand);
+  const bvy=reducedSpeed*(bvyBase-bvyRand)*0.7;
   const floorY=FIELD_BOT-PHYSICS.FLOOR_Y_OFFSET;
   const pts=[];
   let x=hx+(bvx>0?3:-3),y=hy,vx=bvx,vy=bvy;
@@ -162,7 +162,8 @@ function predictAIThrow(targetY, powerPercent) {
   }
 }
 
-function playSound(type) {
+function playSound(type, soundEnabled = true) {
+  if (!soundEnabled) return;
   try {
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     const now = audioContext.currentTime;
@@ -218,6 +219,12 @@ function initGameState(gameMode = "normal", maxStreakOverride = 0, customMaxRoun
   if(gameMode === "realChallenge") {
     return { ...baseState, round:1, phase:"throwing", turn:0, playerIdx:0, score:0, streak:0, maxStreak:maxStreakOverride, gameMode:"realChallenge", stats: { totalThrows: 0, hitLog: 0, points: 0, zoneHits: [0, 0, 0] } };
   }
+  if(gameMode === "superChallenge") {
+    return { ...baseState, round:1, phase:"throwing", turn:0, playerIdx:0, score:0, streak:0, maxStreak:maxStreakOverride, gameMode:"superChallenge", startTime:null, stats: { totalThrows: 0, hitLog: 0, points: 0, zoneHits: [0, 0, 0] } };
+  }
+  if(gameMode === "speedShot") {
+    return { ...baseState, round:1, phase:"throwing", turn:0, playerIdx:0, score:0, startTime:null, gameMode:"speedShot", stats: { totalThrows: 0, hitLog: 0, points: 0, zoneHits: [0, 0, 0] } };
+  }
   if(gameMode === "practice") {
     return { ...baseState, round:1, phase:"throwing", turn:0, playerIdx:0, gameMode:"practice", showTrajectory: true, stats: { totalThrows: 0, hitLog: 0, points: 0, zoneHits: [0, 0, 0] } };
   }
@@ -260,7 +267,7 @@ function determineNextTurn(state, roundMarkers) {
     if(state.round >= state.maxRounds) {
       if(totalA !== totalB) {
         nextPhase = "gameEnd";
-        playSound("gameEnd");
+        playSound("gameEnd", true);
       } else {
         nextMaxRounds++;
       }
@@ -295,6 +302,17 @@ function gameReducer(state, action) {
         }
         return {...state, round: state.round + 1, score: newScore, streak: newStreak, maxStreak: newMaxStreak, log: [...state.log, logLine], stats: updateStats(state.stats, result)};
       }
+      if(gameMode === "superChallenge") {
+        const newScore = state.score + (result.inZone ? result.pts : 0);
+        return {...state, round: state.round + 1, score: newScore, log: [...state.log, logLine], stats: updateStats(state.stats, result)};
+      }
+      if(gameMode === "speedShot") {
+        const newScore = state.score + (result.inZone ? result.pts : 0);
+        if(newScore >= 20) {
+          return {...state, score: newScore, phase: "gameEnd", log: [...state.log, logLine], stats: updateStats(state.stats, result)};
+        }
+        return {...state, round: state.round + 1, score: newScore, log: [...state.log, logLine], stats: updateStats(state.stats, result)};
+      }
       const team = state.turn;
       const newMarker = result.inZone ? {team, pts:result.pts, lx:result.lx, ly:result.ly, zoneIdx:result.zoneIdx} : null;
       const newRM = newMarker ? [...state.roundMarkers, newMarker] : state.roundMarkers;
@@ -307,6 +325,10 @@ function gameReducer(state, action) {
       return {...state, phase: "throwing"};
     case "INIT_GAME":
       return initGameState(action.payload.gameMode, action.payload.maxStreakOverride, action.payload.customMaxRounds);
+    case "SET_START_TIME":
+      return {...state, startTime: action.payload.startTime};
+    case "TIME_UP":
+      return {...state, phase: "gameEnd"};
     default:
       return state;
   }
@@ -315,17 +337,22 @@ function gameReducer(state, action) {
 function useScoreStorage() {
   const [scores, setScores] = useState(() => {
     try {
-      const saved = localStorage.getItem("kurudugaScores");
+      if (typeof window === 'undefined') return [];
+      const saved = localStorage?.getItem("kurudugaScores");
       if (!saved) return [];
       const parsed = JSON.parse(saved);
       return Array.isArray(parsed) ? parsed.filter(s => typeof s.score === 'number' && typeof s.streak === 'number' && typeof s.date === 'string') : [];
     } catch {
-      localStorage.removeItem("kurudugaScores");
       return [];
     }
   });
   const saveScores = useCallback((newScores) => {
-    try { setScores(newScores); localStorage.setItem("kurudugaScores", JSON.stringify(newScores)); } catch (e) { console.error("Failed to save scores:", e); }
+    try { 
+      if (typeof window !== 'undefined' && localStorage) {
+        setScores(newScores); 
+        localStorage.setItem("kurudugaScores", JSON.stringify(newScores)); 
+      }
+    } catch (e) { console.error("Failed to save scores:", e); }
   }, []);
   const addScore = useCallback((score, streak) => {
     const newScoreRecord = { score, streak, date: new Date().toLocaleDateString('ja-JP') };
@@ -333,7 +360,7 @@ function useScoreStorage() {
     saveScores(updatedScores);
   }, [scores, saveScores]);
   const resetScores = useCallback(() => {
-    try { setScores([]); localStorage.removeItem("kurudugaScores"); } catch (e) { console.error("Failed to reset scores:", e); }
+    try { setScores([]); if(typeof window !== 'undefined' && localStorage) localStorage.removeItem("kurudugaScores"); } catch (e) { console.error("Failed to reset scores:", e); }
   }, []);
   return { scores, saveScores, addScore, resetScores };
 }
@@ -401,6 +428,58 @@ function useRealChallengeStats() {
   return { scores, saveScores, addScore, resetScores };
 }
 
+function useSuperChallengeStats() {
+  const [scores, setScores] = useState(() => {
+    try {
+      const saved = localStorage.getItem("kurudugaSuperChallengeScores");
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(s => typeof s.score === 'number' && typeof s.throws === 'number' && typeof s.date === 'string') : [];
+    } catch {
+      localStorage.removeItem("kurudugaSuperChallengeScores");
+      return [];
+    }
+  });
+  const saveScores = useCallback((newScores) => {
+    try { setScores(newScores); localStorage.setItem("kurudugaSuperChallengeScores", JSON.stringify(newScores)); } catch (e) { console.error("Failed to save super challenge scores:", e); }
+  }, []);
+  const addScore = useCallback((score, throws) => {
+    const newScoreRecord = { score, throws, date: new Date().toLocaleDateString('ja-JP') };
+    const updatedScores = [newScoreRecord, ...scores].sort((a, b) => b.score - a.score).slice(0, 5);
+    saveScores(updatedScores);
+  }, [scores, saveScores]);
+  const resetScores = useCallback(() => {
+    try { setScores([]); localStorage.removeItem("kurudugaSuperChallengeScores"); } catch (e) { console.error("Failed to reset super challenge scores:", e); }
+  }, []);
+  return { scores, saveScores, addScore, resetScores };
+}
+
+function useSpeedShotStats() {
+  const [scores, setScores] = useState(() => {
+    try {
+      const saved = localStorage.getItem("kurudugaSpeedShotScores");
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed.filter(s => typeof s.score === 'number' && typeof s.time === 'number' && typeof s.date === 'string') : [];
+    } catch {
+      localStorage.removeItem("kurudugaSpeedShotScores");
+      return [];
+    }
+  });
+  const saveScores = useCallback((newScores) => {
+    try { setScores(newScores); localStorage.setItem("kurudugaSpeedShotScores", JSON.stringify(newScores)); } catch (e) { console.error("Failed to save speed shot scores:", e); }
+  }, []);
+  const addScore = useCallback((score, time) => {
+    const newScoreRecord = { score, time, date: new Date().toLocaleDateString('ja-JP') };
+    const updatedScores = [newScoreRecord, ...scores].sort((a, b) => a.time - b.time).slice(0, 5);
+    saveScores(updatedScores);
+  }, [scores, saveScores]);
+  const resetScores = useCallback(() => {
+    try { setScores([]); localStorage.removeItem("kurudugaSpeedShotScores"); } catch (e) { console.error("Failed to reset speed shot scores:", e); }
+  }, []);
+  return { scores, saveScores, addScore, resetScores };
+}
+
 function useShotStorage() {
   const [shots, setShots] = useState(() => {
     try {
@@ -452,11 +531,18 @@ function useShotStorage() {
   return { shots, addShot, deleteShot, deleteAllShots };
 }
 
-function drawBackground(ctx) {
+function drawBackground(ctx, theme) {
+  const themData = THEME[theme] || THEME.dark;
   const bgGrad = ctx.createLinearGradient(0, 0, 0, CH);
-  bgGrad.addColorStop(0, "#1a4d6d");
-  bgGrad.addColorStop(0.5, "#0d8fa3");
-  bgGrad.addColorStop(1, "#00b4d8");
+  if(theme === "light") {
+    bgGrad.addColorStop(0, "#b8e3f0");
+    bgGrad.addColorStop(0.5, "#7fd9e8");
+    bgGrad.addColorStop(1, "#4bc8e0");
+  } else {
+    bgGrad.addColorStop(0, "#1b5174");
+    bgGrad.addColorStop(0.5, "#0e92a8");
+    bgGrad.addColorStop(1, "#01b8dd");
+  }
   ctx.fillStyle = bgGrad;
   ctx.fillRect(0, 0, CW, CH);
 }
@@ -682,8 +768,35 @@ function drawPlayers(ctx, gameState, animState, inputState, mode) {
   }
 }
 
+const THEME = {
+  dark: {
+    bg: "linear-gradient(135deg, #020042 0%, #0026b4 100%)",
+    canvasBg: "linear-gradient(135deg, #1b5174 0%, #0e92a8 50%, #01b8dd 100%)",
+    cardBg: "rgba(255,255,255,0.1)",
+    cardBorder: "rgba(255,255,255,0.2)",
+    text: "#fff",
+    textSecondary: "#aaa",
+    accentPrimary: "#ffd700",
+    accentSuccess: "#4ade80",
+    accentDanger: "#ff6b6b",
+  },
+  light: {
+    bg: "linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%)",
+    canvasBg: "linear-gradient(135deg, #b8e3f0 0%, #7fd9e8 50%, #4bc8e0 100%)",
+    cardBg: "rgba(0,0,0,0.05)",
+    cardBorder: "rgba(0,0,0,0.1)",
+    text: "#222",
+    textSecondary: "#666",
+    accentPrimary: "#f59e0b",
+    accentSuccess: "#10b981",
+    accentDanger: "#ef4444",
+  }
+};
+
 function App() {
   const [mode, setMode] = useState(null);
+  const [theme, setTheme] = useState("dark");
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const [aiDiff, setAiDiff] = useState(0.5);
   const [customRounds, setCustomRounds] = useState(ROUNDS_MAX);
   const [showStats, setShowStats] = useState(false);
@@ -692,10 +805,13 @@ function App() {
   const [inputState, setInputState] = useState({ox: null, oy: null, cx: null, cy: null});
   const [animState, setAnimState] = useState({anim: null, isThrowing: false, lastResult: null});
   const [replayState, setReplayState] = useState({isReplaying: false, lastThrowData: null});
+  const [timeRemaining, setTimeRemaining] = useState(30);
   
   const { scores, addScore, resetScores } = useScoreStorage();
   const { stats: overallStats, addGameStats, resetStats } = useOverallStats();
   const { scores: realChallengeScores, addScore: addRealChallengeScore, resetScores: resetRealChallengeScores } = useRealChallengeStats();
+  const { scores: superChallengeScores, addScore: addSuperChallengeScore, resetScores: resetSuperChallengeScores } = useSuperChallengeStats();
+  const { scores: speedShotScores, addScore: addSpeedShotScore, resetScores: resetSpeedShotScores } = useSpeedShotStats();
   const { shots, addShot, deleteShot, deleteAllShots } = useShotStorage();
   
   const canvasRef = useRef(null);
@@ -707,6 +823,24 @@ function App() {
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { if(logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [gameState.log]);
+
+  useEffect(() => {
+    if((gameState.gameMode !== "superChallenge" && gameState.gameMode !== "speedShot") || gameState.phase === "gameEnd") return;
+    if(!gameState.startTime) {
+      dispatchGame({type: "SET_START_TIME", payload: {startTime: Date.now()}});
+      return;
+    }
+    const timer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - gameState.startTime) / 1000);
+      const remaining = Math.max(0, 30 - elapsed);
+      setTimeRemaining(remaining);
+      if(remaining === 0 && gameState.gameMode === "superChallenge") {
+        dispatchGame({type: "TIME_UP"});
+        clearInterval(timer);
+      }
+    }, 100);
+    return () => clearInterval(timer);
+  }, [gameState.gameMode, gameState.phase, gameState.startTime]);
 
   useEffect(() => {
     if(mode !== "ai" || gameState.phase !== "throwing" || gameState.turn !== 1 || animState.isThrowing) return;
@@ -776,9 +910,9 @@ function App() {
   const finishThrow = useCallback((result) => {
     setAnimState(prev => ({...prev, anim: null, isThrowing: false}));
     
-    if(result.hitMarutai && result.inZone) playSound("zone");
-    else if(result.hitMarutai) playSound("hit");
-    else playSound("miss");
+    if(result.hitMarutai && result.inZone) playSound("zone", soundEnabled);
+    else if(result.hitMarutai) playSound("hit", soundEnabled);
+    else playSound("miss", soundEnabled);
     
     const s = gameStateRef.current;
     const gameMode = s.gameMode;
@@ -788,13 +922,17 @@ function App() {
       logLine = result.hitMarutai && result.inZone ? `${s.round}投目: ${result.pts}点（命中位置: ${result.zoneIdx + 1}pt ゾーン）` : result.hitMarutai ? `${s.round}投目: 丸太命中 → ゾーン外` : `${s.round}投目: 外れ`;
     } else if(gameMode === "challenge" || gameMode === "realChallenge") {
       logLine = result.hitMarutai && result.inZone ? `${s.round}投目: ${result.pts}点ゲット！（合計${s.score + result.pts}点）` : result.hitMarutai ? `${s.round}投目: ゾーン外...（合計${s.score}点）` : `${s.round}投目: 外れ...`;
+    } else if(gameMode === "superChallenge") {
+      logLine = result.hitMarutai && result.inZone ? `${s.round}投目: +${result.pts}点` : result.hitMarutai ? `${s.round}投目: ゾーン外` : `${s.round}投目: 外れ`;
+    } else if(gameMode === "speedShot") {
+      logLine = result.hitMarutai && result.inZone ? `${s.round}投目: +${result.pts}点（合計${s.score + result.pts}点）` : result.hitMarutai ? `${s.round}投目: ゾーン外` : `${s.round}投目: 外れ`;
     } else {
       const TEAM_NAME = modeRef.current === "ai" ? TEAM_NAME_AI : TEAM_NAME_PVP;
       logLine = result.hitMarutai ? (result.inZone ? `R${s.round} ${TEAM_NAME[s.turn]} P${s.playerIdx+1}: 丸太命中 → ${result.pts}点` : `R${s.round} ${TEAM_NAME[s.turn]} P${s.playerIdx+1}: 丸太命中 → ゾーン外`) : `R${s.round} ${TEAM_NAME[s.turn]} P${s.playerIdx+1}: 外れ`;
     }
     
     dispatchGame({type: "FINISH_THROW", payload: {result, logLine}});
-  }, []);
+  }, [soundEnabled]);
 
   const playReplay = useCallback(() => {
     if(!replayState.lastThrowData) return;
@@ -820,7 +958,7 @@ function App() {
     if(!cvs || !gameState) return;
     const ctx = cvs.getContext("2d");
     ctx.clearRect(0, 0, CW, CH);
-    drawBackground(ctx);
+    drawBackground(ctx, theme);
     drawField(ctx);
     drawZones(ctx);
     drawLog(ctx);
@@ -828,7 +966,7 @@ function App() {
     if(animState.anim) drawProjectile(ctx, animState.anim);
     drawDragPreview(ctx, inputState, gameState, animState);
     drawPlayers(ctx, gameState, animState, inputState, mode);
-  }, [gameState, animState, inputState, mode]);
+  }, [gameState, animState, inputState, mode, theme]);
 
   const getPos = (e) => {
     const cvs = canvasRef.current, rect = cvs.getBoundingClientRect();
@@ -878,6 +1016,7 @@ function App() {
   const startGame = useCallback((m) => { 
     if(m === "challenge") { setMode("challenge"); setReplayState({isReplaying: false, lastThrowData: null}); dispatchGame({type: "INIT_GAME", payload: {gameMode: "challenge"}}); }
     else if(m === "practice") { setMode("practice"); setReplayState({isReplaying: false, lastThrowData: null}); dispatchGame({type: "INIT_GAME", payload: {gameMode: "practice"}}); }
+    else if(m === "superChallenge") { setMode("superChallenge"); setReplayState({isReplaying: false, lastThrowData: null}); dispatchGame({type: "INIT_GAME", payload: {gameMode: "superChallenge"}}); setTimeRemaining(30); }
     else { setMode(m); setReplayState({isReplaying: false, lastThrowData: null}); dispatchGame({type: "INIT_GAME", payload: {gameMode: m, customMaxRounds: customRounds}}); }
   }, [customRounds]);
 
@@ -889,7 +1028,7 @@ function App() {
           <button onClick={() => setShowStats(false)} style={{padding:"10px 20px",background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,fontSize:13,cursor:"pointer",fontWeight:"400",backdropFilter:"blur(8px)"}}>戻る</button>
         </div>
         <div style={{width:"100%",maxWidth:900,display:"flex",flexDirection:"column",gap:16,overflowY:"auto",maxHeight:"75vh"}}>
-          {overallStats && overallStats.gameCount > 0 && (
+          {(overallStats && overallStats.gameCount > 0) || (scores && scores.length > 0) || (realChallengeScores && realChallengeScores.length > 0) || (superChallengeScores && superChallengeScores.length > 0) || (speedShotScores && speedShotScores.length > 0) ? (
             <div style={{background:"rgba(255,255,255,0.1)",borderRadius:12,padding:"20px",boxShadow:"0 4px 16px rgba(0,0,0,0.2)",border:"1px solid rgba(255,255,255,0.2)",backdropFilter:"blur(8px)"}}>
               <h3 style={{color:"#fff",fontSize:14,margin:"0 0 14px 0",fontWeight:"500",letterSpacing:0.5}}>チャレンジ統計</h3>
               <div style={{color:"#fff",fontSize:13,lineHeight:2}}>
@@ -900,7 +1039,7 @@ function App() {
                 <div style={{color:"#fff",fontSize:11,marginTop:12,borderTop:"1px solid rgba(255,255,255,0.2)",paddingTop:12}}>ゾーン別: 1pt {overallStats.zoneHits && overallStats.zoneHits[0] ? overallStats.zoneHits[0] : 0} | 2pt {overallStats.zoneHits && overallStats.zoneHits[1] ? overallStats.zoneHits[1] : 0} | 3pt {overallStats.zoneHits && overallStats.zoneHits[2] ? overallStats.zoneHits[2] : 0}</div>
               </div>
             </div>
-          )}
+          ) : null}
           {scores && scores.length > 0 && (
             <div style={{background:"rgba(255,255,255,0.1)",borderRadius:12,padding:"20px",boxShadow:"0 4px 16px rgba(0,0,0,0.2)",border:"1px solid rgba(255,255,255,0.2)",backdropFilter:"blur(8px)"}}>
               <h3 style={{color:"#fff",fontSize:14,margin:"0 0 14px 0",fontWeight:"500",letterSpacing:0.5}}>どこまでチャレンジ ランキング</h3>
@@ -923,13 +1062,37 @@ function App() {
               ))}
             </div>
           )}
-          {(!overallStats || overallStats.gameCount === 0) && (!scores || scores.length === 0) && (!realChallengeScores || realChallengeScores.length === 0) && (
+          {superChallengeScores && superChallengeScores.length > 0 && (
+            <div style={{background:"rgba(255,255,255,0.1)",borderRadius:12,padding:"20px",boxShadow:"0 4px 16px rgba(0,0,0,0.2)",border:"1px solid rgba(255,255,255,0.2)",backdropFilter:"blur(8px)"}}>
+              <h3 style={{color:"#fff",fontSize:14,margin:"0 0 14px 0",fontWeight:"500",letterSpacing:0.5}}>超枝投げ ランキング</h3>
+              {superChallengeScores.map((s, i) => (
+                <div key={i} style={{color:"#fff",fontSize:12,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.1)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div><span style={{color:"#ff6600",fontWeight:"500",fontSize:13}}>#{i+1}</span> <span style={{fontSize:13,fontWeight:"500",color:"#fff"}}>{s.score}点</span> ({s.throws}投)</div>
+                  <span style={{color:"#fff",fontSize:11}}>{s.date}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {speedShotScores && speedShotScores.length > 0 && (
+            <div style={{background:"rgba(255,255,255,0.1)",borderRadius:12,padding:"20px",boxShadow:"0 4px 16px rgba(0,0,0,0.2)",border:"1px solid rgba(255,255,255,0.2)",backdropFilter:"blur(8px)"}}>
+              <h3 style={{color:"#fff",fontSize:14,margin:"0 0 14px 0",fontWeight:"500",letterSpacing:0.5}}>スピードショット ランキング</h3>
+              {speedShotScores.map((s, i) => (
+                <div key={i} style={{color:"#fff",fontSize:12,padding:"10px 0",borderBottom:"1px solid rgba(255,255,255,0.1)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div><span style={{color:"#0284c7",fontWeight:"500",fontSize:13}}>#{i+1}</span> <span style={{fontSize:13,fontWeight:"500",color:"#fff"}}>{s.time}秒</span> ({s.score}点達成)</div>
+                  <span style={{color:"#fff",fontSize:11}}>{s.date}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {(!overallStats || overallStats.gameCount === 0) && (!scores || scores.length === 0) && (!realChallengeScores || realChallengeScores.length === 0) && (!superChallengeScores || superChallengeScores.length === 0) && (!speedShotScores || speedShotScores.length === 0) && (
             <div style={{color:"#fff",fontSize:14,textAlign:"center",padding:50}}>統計データがまだありません</div>
           )}
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
             {overallStats && overallStats.gameCount > 0 && <button onClick={() => resetStats()} style={{flex:1,padding:"10px",background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,fontSize:12,cursor:"pointer",fontWeight:"400"}}>統計リセット</button>}
             {scores && scores.length > 0 && <button onClick={() => resetScores()} style={{flex:1,padding:"10px",background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,fontSize:12,cursor:"pointer",fontWeight:"400"}}>どこまでランキングリセット</button>}
             {realChallengeScores && realChallengeScores.length > 0 && <button onClick={() => resetRealChallengeScores()} style={{flex:1,padding:"10px",background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,fontSize:12,cursor:"pointer",fontWeight:"400"}}>ほんとうにランキングリセット</button>}
+            {superChallengeScores && superChallengeScores.length > 0 && <button onClick={() => resetSuperChallengeScores()} style={{flex:1,padding:"10px",background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,fontSize:12,cursor:"pointer",fontWeight:"400"}}>超枝投げランキングリセット</button>}
+            {speedShotScores && speedShotScores.length > 0 && <button onClick={() => resetSpeedShotScores()} style={{flex:1,padding:"10px",background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:8,fontSize:12,cursor:"pointer",fontWeight:"400"}}>スピードショットランキングリセット</button>}
           </div>
         </div>
       </div>
@@ -967,26 +1130,6 @@ function App() {
                       </div>
                     </div>
                     <div style={{display:"flex",gap:10}}>
-                      <button onClick={() => {
-                        setShowShotManager(false);
-                        setTimeout(() => {
-                          const fullPts = shot.pts;
-                          setAnimState(prev => ({...prev, isThrowing: true, anim: {pts: fullPts, idx: 0}}));
-                          let idx = 0;
-                          const tick = () => {
-                            idx += 3;
-                            if(idx >= fullPts.length) {
-                              setAnimState(prev => ({...prev, isThrowing: false, anim: null}));
-                              return;
-                            }
-                            setAnimState(prev => ({...prev, anim: prev.anim ? {...prev.anim, idx} : null}));
-                            animRef.current = requestAnimationFrame(tick);
-                          };
-                          animRef.current = requestAnimationFrame(tick);
-                        }, 100);
-                      }} style={{padding:"8px 16px",background:"rgba(0,212,255,0.3)",color:"#00d4ff",border:"1px solid rgba(0,212,255,0.5)",borderRadius:8,fontSize:11,fontWeight:"500",cursor:"pointer"}}>
-                        再生
-                      </button>
                       <button onClick={() => deleteShot(i)} style={{padding:"8px 16px",background:"rgba(255,107,157,0.3)",color:"#ff6b9d",border:"1px solid rgba(255,107,157,0.5)",borderRadius:8,fontSize:11,fontWeight:"500",cursor:"pointer"}}>
                         削除
                       </button>
@@ -994,6 +1137,7 @@ function App() {
                   </div>
                 );
               })}
+              {shots.length > 0 && <button onClick={() => deleteAllShots()} style={{width:"100%",padding:"10px",background:"rgba(255,107,157,0.3)",color:"#ff6b9d",border:"1px solid rgba(255,107,157,0.5)",borderRadius:8,fontSize:12,cursor:"pointer",fontWeight:"500"}}>すべて削除</button>}
             </>
           ) : (
             <div style={{color:"#fff",fontSize:14,textAlign:"center",padding:50}}>
@@ -1007,36 +1151,46 @@ function App() {
 
   if(gameState.gameMode === "normal" && !mode && !showShotManager && !showStats) {
     return (
-      <div style={{fontFamily:"system-ui,sans-serif",background:"linear-gradient(135deg,#020042 0%, #0026b4 100%)",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:24,padding:24}}>
+      <div style={{fontFamily:"system-ui,sans-serif",background:THEME[theme].bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:24,padding:24}}>
+        <div style={{position:"absolute",top:20,right:20,display:"flex",gap:10}}>
+          <button onClick={() => setSoundEnabled(!soundEnabled)} style={{padding:"8px 16px",background:THEME[theme].cardBg,color:THEME[theme].text,border:`1px solid ${THEME[theme].cardBorder}`,borderRadius:8,fontSize:13,fontWeight:"500",cursor:"pointer",backdropFilter:"blur(8px)"}}>
+            {soundEnabled ? "🔊" : "🔇"}
+          </button>
+          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} style={{padding:"8px 16px",background:THEME[theme].cardBg,color:THEME[theme].text,border:`1px solid ${THEME[theme].cardBorder}`,borderRadius:8,fontSize:13,fontWeight:"500",cursor:"pointer",backdropFilter:"blur(8px)"}}>
+            {theme === "dark" ? "☀️ ライト" : "🌙 ダーク"}
+          </button>
+        </div>
         <div style={{textAlign:"center"}}>
-          <h1 style={{color:"#fff",letterSpacing:3,fontSize:56,margin:"0 0 4px 0",fontWeight:"300"}}>クルドゥガ</h1>
-          <p style={{color:"#fff",fontSize:13,margin:0,marginBottom:36,fontWeight:"400",letterSpacing:1}}>ナウルの伝統的スポーツ</p>
+          <h1 style={{color:THEME[theme].text,letterSpacing:3,fontSize:56,margin:"0 0 4px 0",fontWeight:"300"}}>クルドゥガ</h1>
+          <p style={{color:THEME[theme].text,fontSize:13,margin:0,marginBottom:36,fontWeight:"400",letterSpacing:1}}>ナウルの伝統的スポーツ</p>
         </div>
         <div style={{display:"flex",gap:16,flexDirection:"column",alignItems:"center",width:"100%",maxWidth:640}}>
           <div style={{display:"flex",gap:14,width:"100%"}}>
-            <button onClick={() => startGame("pvp")} style={{flex:1,padding:"20px",background:"linear-gradient(135deg, rgba(255,107,157,0.25) 0%, rgba(255,20,147,0.25) 100%)",color:"#fff",border:"1px solid rgba(255,107,157,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",transition:"all 0.2s",backdropFilter:"blur(8px)"}}>対戦</button>
+            <button onClick={() => startGame("pvp")} style={{flex:1,padding:"20px",background:theme==="dark"?"linear-gradient(135deg, rgba(255,107,157,0.25) 0%, rgba(255,20,147,0.25) 100%)":"linear-gradient(135deg, rgba(236,72,153,0.2) 0%, rgba(219,39,119,0.2) 100%)",color:THEME[theme].text,border:theme==="dark"?"1px solid rgba(255,107,157,0.4)":"1px solid rgba(236,72,153,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",transition:"all 0.2s",backdropFilter:"blur(8px)"}}>対戦</button>
             <div style={{display:"flex",flexDirection:"column",gap:10,flex:1}}>
-              <button onClick={() => startGame("ai")} style={{width:"100%",padding:"20px",background:"linear-gradient(135deg, rgba(0,212,255,0.25) 0%, rgba(0,150,200,0.25) 100%)",color:"#fff",border:"1px solid rgba(0,212,255,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>AI対戦</button>
-              <div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"center",background:"rgba(255,255,255,0.1)",padding:"10px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",backdropFilter:"blur(8px)"}}>
-                <span style={{color:"#fff",fontSize:11,fontWeight:"500"}}>易</span>
-                <input type="range" min="0" max="1" step="0.1" value={aiDiff} onChange={(e) => setAiDiff(parseFloat(e.target.value))} style={{width:80,accentColor:"#ffd700",height:4}}/>
-                <span style={{color:"#fff",fontSize:11,fontWeight:"500"}}>難</span>
-                <span style={{color:"#fff",fontSize:11,fontWeight:"500",minWidth:50}}>{aiDiff<=0.3?"かんたん":aiDiff<=0.6?"ふつう":"むずかしい"}</span>
+              <button onClick={() => startGame("ai")} style={{width:"100%",padding:"20px",background:theme==="dark"?"linear-gradient(135deg, rgba(0,212,255,0.25) 0%, rgba(0,150,200,0.25) 100%)":"linear-gradient(135deg, rgba(2,132,199,0.2) 0%, rgba(3,102,214,0.2) 100%)",color:THEME[theme].text,border:theme==="dark"?"1px solid rgba(0,212,255,0.4)":"1px solid rgba(2,132,199,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>AI対戦</button>
+              <div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"center",background:THEME[theme].cardBg,padding:"10px 12px",borderRadius:10,border:`1px solid ${THEME[theme].cardBorder}`,backdropFilter:"blur(8px)"}}>
+                <span style={{color:THEME[theme].text,fontSize:11,fontWeight:"500"}}>易</span>
+                <input type="range" min="0" max="1" step="0.1" value={aiDiff} onChange={(e) => setAiDiff(parseFloat(e.target.value))} style={{width:80,accentColor:THEME[theme].accentPrimary,height:4}}/>
+                <span style={{color:THEME[theme].text,fontSize:11,fontWeight:"500"}}>難</span>
+                <span style={{color:THEME[theme].text,fontSize:11,fontWeight:"500",minWidth:50}}>{aiDiff<=0.3?"かんたん":aiDiff<=0.6?"ふつう":"むずかしい"}</span>
               </div>
             </div>
           </div>
-          <div style={{width:"100%",display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:"rgba(255,255,255,0.1)",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",backdropFilter:"blur(8px)"}}>
-            <span style={{color:"#fff",fontSize:12,fontWeight:"500",minWidth:60}}>ラウンド数</span>
-            <input type="range" min="1" max="5" step="1" value={customRounds} onChange={(e) => setCustomRounds(parseInt(e.target.value))} style={{flex:1,accentColor:"#ffd700",height:4}}/>
-            <span style={{color:"#fff",fontSize:15,fontWeight:"500",minWidth:40}}>{customRounds}R</span>
+          <div style={{width:"100%",display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:THEME[theme].cardBg,borderRadius:10,border:`1px solid ${THEME[theme].cardBorder}`,backdropFilter:"blur(8px)"}}>
+            <span style={{color:THEME[theme].text,fontSize:12,fontWeight:"500",minWidth:60}}>ラウンド数</span>
+            <input type="range" min="1" max="5" step="1" value={customRounds} onChange={(e) => setCustomRounds(parseInt(e.target.value))} style={{flex:1,accentColor:THEME[theme].accentPrimary,height:4}}/>
+            <span style={{color:THEME[theme].text,fontSize:15,fontWeight:"500",minWidth:40}}>{customRounds}R</span>
           </div>
-          <div style={{display:"flex",gap:14,width:"100%"}}>
-            <button onClick={() => startGame("challenge")} style={{flex:1,padding:"20px",background:"linear-gradient(135deg, rgba(255,215,0,0.25) 0%, rgba(255,165,0,0.25) 100%)",color:"#fff",border:"1px solid rgba(255,215,0,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>どこまで<br/>チャレンジ</button>
-            <button onClick={() => setMode("realChallengeConfirm")} style={{flex:1,padding:"20px",background:"linear-gradient(135deg, rgba(255,0,0,0.25) 0%, rgba(220,20,60,0.25) 100%)",color:"#fff",border:"1px solid rgba(255,0,0,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>ほんとうに<br/>チャレンジ？</button>
-            <button onClick={() => startGame("practice")} style={{flex:1,padding:"20px",background:"linear-gradient(135deg, rgba(76,175,80,0.25) 0%, rgba(56,142,60,0.25) 100%)",color:"#fff",border:"1px solid rgba(76,175,80,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>練習<br/>モード</button>
+          <div style={{display:"flex",gap:14,width:"100%",flexWrap:"wrap"}}>
+            <button onClick={() => startGame("challenge")} style={{flex:1,minWidth:"150px",padding:"20px",background:theme==="dark"?"linear-gradient(135deg, rgba(255,215,0,0.25) 0%, rgba(255,165,0,0.25) 100%)":"linear-gradient(135deg, rgba(217,119,6,0.2) 0%, rgba(180,83,9,0.2) 100%)",color:THEME[theme].text,border:theme==="dark"?"1px solid rgba(255,215,0,0.4)":"1px solid rgba(217,119,6,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>どこまで<br/>チャレンジ</button>
+            <button onClick={() => setMode("realChallengeConfirm")} style={{flex:1,minWidth:"150px",padding:"20px",background:theme==="dark"?"linear-gradient(135deg, rgba(255,0,0,0.25) 0%, rgba(220,20,60,0.25) 100%)":"linear-gradient(135deg, rgba(220,38,38,0.2) 0%, rgba(185,28,28,0.2) 100%)",color:THEME[theme].text,border:theme==="dark"?"1px solid rgba(255,0,0,0.4)":"1px solid rgba(220,38,38,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>ほんとうに<br/>チャレンジ？</button>
+            <button onClick={() => startGame("speedShot")} style={{flex:1,minWidth:"150px",padding:"20px",background:theme==="dark"?"linear-gradient(135deg, rgba(34,197,94,0.25) 0%, rgba(22,163,74,0.25) 100%)":"linear-gradient(135deg, rgba(34,197,94,0.2) 0%, rgba(22,163,74,0.2) 100%)",color:THEME[theme].text,border:theme==="dark"?"1px solid rgba(34,197,94,0.4)":"1px solid rgba(34,197,94,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>スピード<br/>ショット</button>
+            <button onClick={() => startGame("superChallenge")} style={{flex:1,minWidth:"150px",padding:"20px",background:theme==="dark"?"linear-gradient(135deg, rgba(255,128,0,0.25) 0%, rgba(255,69,0,0.25) 100%)":"linear-gradient(135deg, rgba(234,88,12,0.2) 0%, rgba(194,65,12,0.2) 100%)",color:THEME[theme].text,border:theme==="dark"?"1px solid rgba(255,128,0,0.4)":"1px solid rgba(234,88,12,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>超枝投げ<br/>チャレンジ</button>
+            <button onClick={() => startGame("practice")} style={{flex:1,minWidth:"150px",padding:"20px",background:theme==="dark"?"linear-gradient(135deg, rgba(76,175,80,0.25) 0%, rgba(56,142,60,0.25) 100%)":"linear-gradient(135deg, rgba(34,197,94,0.2) 0%, rgba(22,163,74,0.2) 100%)",color:THEME[theme].text,border:theme==="dark"?"1px solid rgba(76,175,80,0.4)":"1px solid rgba(34,197,94,0.4)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>練習<br/>モード</button>
           </div>
-          {(scores.length > 0 || overallStats.gameCount > 0) && <button onClick={() => setShowStats(true)} style={{width:"100%",padding:"14px",background:"linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.1) 100%)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:12,fontSize:14,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>統計を見る</button>}
-          {shots.length > 0 && <button onClick={() => setShowShotManager(true)} style={{width:"100%",padding:"14px",background:"linear-gradient(135deg, rgba(100,200,255,0.15) 0%, rgba(100,150,255,0.1) 100%)",color:"#64c8ff",border:"1px solid rgba(100,200,255,0.3)",borderRadius:12,fontSize:14,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>ショット管理 ({shots.length}/25)</button>}
+          {(scores.length > 0 || overallStats.gameCount > 0) && <button onClick={() => setShowStats(true)} style={{width:"100%",padding:"14px",background:THEME[theme].cardBg,color:THEME[theme].text,border:`1px solid ${THEME[theme].cardBorder}`,borderRadius:12,fontSize:14,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>統計を見る</button>}
+          {shots.length > 0 && <button onClick={() => setShowShotManager(true)} style={{width:"100%",padding:"14px",background:theme==="dark"?"linear-gradient(135deg, rgba(100,200,255,0.15) 0%, rgba(100,150,255,0.1) 100%)":"linear-gradient(135deg, rgba(2,132,199,0.15) 0%, rgba(3,102,214,0.1) 100%)",color:theme==="dark"?"#64c8ff":THEME[theme].text,border:theme==="dark"?"1px solid rgba(100,200,255,0.3)":`1px solid rgba(2,132,199,0.3)`,borderRadius:12,fontSize:14,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>ショット管理 ({shots.length}/25)</button>}
         </div>
       </div>
     );
@@ -1044,54 +1198,77 @@ function App() {
 
   if(mode === "realChallengeConfirm") {
     return (
-      <div style={{fontFamily:"system-ui,sans-serif",background:"linear-gradient(135deg,#020042 0%, #0026b4 100%)",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:24,padding:24}}>
+      <div style={{fontFamily:"system-ui,sans-serif",background:THEME[theme].bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:24,padding:24}}>
+        <div style={{position:"absolute",top:20,right:20,display:"flex",gap:10}}>
+          <button onClick={() => setSoundEnabled(!soundEnabled)} style={{padding:"8px 16px",background:THEME[theme].cardBg,color:THEME[theme].text,border:`1px solid ${THEME[theme].cardBorder}`,borderRadius:8,fontSize:13,fontWeight:"500",cursor:"pointer",backdropFilter:"blur(8px)"}}>
+            {soundEnabled ? "🔊" : "🔇"}
+          </button>
+          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} style={{padding:"8px 16px",background:THEME[theme].cardBg,color:THEME[theme].text,border:`1px solid ${THEME[theme].cardBorder}`,borderRadius:8,fontSize:13,fontWeight:"500",cursor:"pointer",backdropFilter:"blur(8px)"}}>
+            {theme === "dark" ? "☀️ ライト" : "🌙 ダーク"}
+          </button>
+        </div>
         <div style={{textAlign:"center"}}>
           <h1 style={{color:"#ff0000",letterSpacing:3,fontSize:48,margin:"0 0 16px 0",fontWeight:"bold"}}>ほんとうに？</h1>
-          <p style={{color:"#fff",fontSize:16,margin:0,marginBottom:36,fontWeight:"400",letterSpacing:1,lineHeight:1.8}}>このモードでは<br/>放物線の予想線が表示されません<br/>本気のチャレンジです</p>
+          <p style={{color:THEME[theme].text,fontSize:16,margin:0,marginBottom:36,fontWeight:"400",letterSpacing:1,lineHeight:1.8}}>このモードでは<br/>放物線の予想線が表示されません<br/>本気のチャレンジです</p>
         </div>
         <div style={{display:"flex",gap:16,flexDirection:"column",alignItems:"center",width:"100%",maxWidth:400}}>
           <button onClick={() => {setMode("realChallenge");dispatchGame({type: "INIT_GAME", payload: {gameMode: "realChallenge"}});setReplayState({isReplaying: false, lastThrowData: null});}} style={{width:"100%",padding:"20px",background:"linear-gradient(135deg, rgba(255,0,0,0.4) 0%, rgba(220,20,60,0.4) 100%)",color:"#fff",border:"2px solid rgba(255,0,0,0.6)",borderRadius:12,fontSize:18,fontWeight:"bold",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>本気でチャレンジする</button>
-          <button onClick={() => {setMode(null);}} style={{width:"100%",padding:"20px",background:"linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.1) 100%)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:12,fontSize:16,fontWeight:"500",cursor:"pointer",boxShadow:"0 4px 12px rgba(0,0,0,0.2)",backdropFilter:"blur(8px)"}}>メニューに戻る</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{fontFamily:"system-ui,sans-serif",background:"linear-gradient(135deg, #020042 0%, #0026b4 100%)",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",padding:14}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
-        <h2 style={{color:"#fff",margin:0,letterSpacing:2}}>クルドゥガ</h2>
-        {mode==="ai"&&<span style={{background:"#ff6b9d",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>AI対戦</span>}
-        {mode==="pvp"&&<span style={{background:"#00d4ff",color:"#333",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>対戦</span>}
-        {mode==="challenge"&&<span style={{background:"#ffd700",color:"#333",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>チャレンジ</span>}
-        {mode==="realChallenge"&&<span style={{background:"#ff0000",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>本気チャレンジ</span>}
-        {mode==="practice"&&<span style={{background:"#af4c4c",color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:"bold"}}>練習</span>}
-        <button onClick={() => {setMode(null);setReplayState({isReplaying: false, lastThrowData: null});dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});setCustomRounds(ROUNDS_MAX);}} style={{padding:"3px 10px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:6,fontSize:11,cursor:"pointer"}}>メニュー</button>
+    <div style={{fontFamily:"system-ui,sans-serif",background:THEME[theme].bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",padding:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6,width:"100%",maxWidth:CW,justifyContent:"space-between"}}>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={() => setSoundEnabled(!soundEnabled)} style={{padding:"6px 12px",background:THEME[theme].cardBg,color:THEME[theme].text,border:`1px solid ${THEME[theme].cardBorder}`,borderRadius:6,fontSize:12,fontWeight:"500",cursor:"pointer",backdropFilter:"blur(8px)"}}>
+            {soundEnabled ? "🔊" : "🔇"}
+          </button>
+          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} style={{padding:"6px 12px",background:THEME[theme].cardBg,color:THEME[theme].text,border:`1px solid ${THEME[theme].cardBorder}`,borderRadius:6,fontSize:12,fontWeight:"500",cursor:"pointer",backdropFilter:"blur(8px)"}}>
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
+        </div>
+        <button onClick={() => {setMode(null);setReplayState({isReplaying: false, lastThrowData: null});dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});setCustomRounds(ROUNDS_MAX);}} style={{padding:"6px 10px",background:THEME[theme].cardBg,color:THEME[theme].text,border:`1px solid ${THEME[theme].cardBorder}`,borderRadius:6,fontSize:11,cursor:"pointer"}}>メニュー</button>
       </div>
 
       <div style={{display:"flex",gap:10,marginBottom:8,width:"100%",maxWidth:CW}}>
         {gameState.gameMode === "challenge" || gameState.gameMode === "realChallenge" ? (
-          <div style={{flex:1,background:"#fff5e6",borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
-            <div style={{fontWeight:"bold",color:"#ff9800",fontSize:12}}>{gameState.gameMode === "realChallenge" ? "本気チャレンジ" : "チャレンジ"}</div>
-            <div style={{fontSize:22,fontWeight:"bold",color:"#ff9800"}}>{gameState.score}<span style={{fontSize:11}}>点</span></div>
-            <div style={{fontSize:10,color:"#666"}}>連続成功: {gameState.streak} / 最高記録: {gameState.maxStreak}</div>
+          <div style={{flex:1,background:theme==="dark"?"#fff5e6":"#fef3e2",borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
+            <div style={{fontWeight:"bold",color:theme==="dark"?"#ff9800":"#d97706",fontSize:12}}>{gameState.gameMode === "realChallenge" ? "ほんとうにチャレンジ" : "どこまでチャレンジ"}</div>
+            <div style={{fontSize:22,fontWeight:"bold",color:theme==="dark"?"#ff9800":"#d97706"}}>{gameState.score}<span style={{fontSize:11}}>点</span></div>
+            <div style={{fontSize:10,color:theme==="dark"?"#666":"#555"}}>連続成功: {gameState.streak} / 最高記録: {gameState.maxStreak}</div>
+          </div>
+        ) : gameState.gameMode === "superChallenge" ? (
+          <div style={{flex:1,background:theme==="dark"?"#ffe8cc":"#fed7aa",borderRadius:8,padding:"5px 12px",textAlign:"center",position:"relative"}}>
+            <div style={{position:"absolute",right:10,top:5,background:theme==="dark"?"#ff6600":"#f97316",color:theme==="dark"?"#fff":"#222",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:"bold"}}>残り {timeRemaining}秒</div>
+            <div style={{fontWeight:"bold",color:theme==="dark"?"#ff6600":"#f97316",fontSize:12}}>超枝投げ</div>
+            <div style={{fontSize:22,fontWeight:"bold",color:theme==="dark"?"#ff6600":"#f97316"}}>{gameState.score}<span style={{fontSize:11}}>点</span></div>
+            <div style={{fontSize:10,color:theme==="dark"?"#666":"#555"}}>投数: {gameState.round - 1}</div>
+          </div>
+        ) : gameState.gameMode === "speedShot" ? (
+          <div style={{flex:1,background:theme==="dark"?"#e0f2fe":"#cffafe",borderRadius:8,padding:"5px 12px",textAlign:"center",position:"relative"}}>
+            <div style={{position:"absolute",right:10,top:5,background:theme==="dark"?"#0284c7":"#06b6d4",color:theme==="dark"?"#fff":"#222",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:"bold"}}>⏱ {gameState.startTime ? Math.floor((Date.now() - gameState.startTime) / 1000) : 0}秒</div>
+            <div style={{fontWeight:"bold",color:theme==="dark"?"#0284c7":"#06b6d4",fontSize:12}}>スピードショット</div>
+            <div style={{fontSize:22,fontWeight:"bold",color:theme==="dark"?"#0284c7":"#06b6d4"}}>{gameState.score}<span style={{fontSize:11}}>点</span></div>
+            <div style={{fontSize:10,color:theme==="dark"?"#666":"#555"}}>目標: 20点</div>
           </div>
         ) : gameState.gameMode === "practice" ? (
-          <div style={{flex:1,background:"#e8f5e9",borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
-            <div style={{fontWeight:"bold",color:"#af4c4c",fontSize:12}}>練習モード</div>
-            <div style={{fontSize:22,fontWeight:"bold",color:"#af4c4c"}}>{gameState.round-1}<span style={{fontSize:11}}>投</span></div>
-            <div style={{fontSize:10,color:"#666"}}>軌道を確認できます</div>
+          <div style={{flex:1,background:theme==="dark"?"#e8f5e9":"#dbeafe",borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
+            <div style={{fontWeight:"bold",color:theme==="dark"?"#af4c4c":"#7c2d12",fontSize:12}}>練習モード</div>
+            <div style={{fontSize:22,fontWeight:"bold",color:theme==="dark"?"#af4c4c":"#7c2d12"}}>{gameState.round-1}<span style={{fontSize:11}}>投</span></div>
+            <div style={{fontSize:10,color:theme==="dark"?"#666":"#555"}}>軌道を確認できます</div>
           </div>
         ) : (
           [0,1].map(t => (
-            <div key={t} style={{flex:1,background:TEAM_BG[t],borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
-              <div style={{fontWeight:"bold",color:TEAM_COLOR[t],fontSize:12}}>
+            <div key={t} style={{flex:1,background:theme==="dark"?TEAM_BG[t]:(t===0?"#e0f2fe":"#fce7f3"),borderRadius:8,padding:"5px 12px",textAlign:"center"}}>
+              <div style={{fontWeight:"bold",color:theme==="dark"?TEAM_COLOR[t]:(t===0?"#0284c7":"#db2777"),fontSize:12}}>
                 {TEAM_NAME[t]}{mode==="ai"&&t===1&&<span style={{fontSize:10,marginLeft:4}}>AI</span>}
               </div>
-              <div style={{fontSize:22,fontWeight:"bold",color:TEAM_COLOR[t]}}>{total(t)}<span style={{fontSize:11}}>点</span></div>
-              <div style={{fontSize:10,color:"#666"}}>
+              <div style={{fontSize:22,fontWeight:"bold",color:theme==="dark"?TEAM_COLOR[t]:(t===0?"#0284c7":"#db2777")}}>{total(t)}<span style={{fontSize:11}}>点</span></div>
+              <div style={{fontSize:10,color:theme==="dark"?"#666":"#555"}}>
                 {Array.from({length:gameState.maxRounds}, (_,i) => (
-                  <span key={i} style={{marginRight:4,color:i<gameState.round-1?TEAM_COLOR[t]:"#bbb"}}>R{i+1}:{gameState.scores[t][i]??0}</span>
+                  <span key={i} style={{marginRight:4,color:i<gameState.round-1?(theme==="dark"?TEAM_COLOR[t]:(t===0?"#0284c7":"#db2777")):"#bbb"}}>R{i+1}:{gameState.scores[t][i]??0}</span>
                 ))}
               </div>
             </div>
@@ -1099,8 +1276,8 @@ function App() {
         )}
       </div>
 
-      <div style={{fontSize:12,color:"#fff",marginBottom:6,textAlign:"center"}}>
-        {gameState.gameMode === "challenge" || gameState.gameMode === "realChallenge" ? <span>投{gameState.round}目</span> : <span>R{gameState.round}{gameState.round>ROUNDS_MAX?"（延長）":""} — <span style={{color:TEAM_COLOR[gameState.turn],fontWeight:"bold"}}>{TEAM_NAME[gameState.turn]} P{gameState.playerIdx+1} の番</span></span>}
+      <div style={{fontSize:12,color:THEME[theme].text,marginBottom:6,textAlign:"center"}}>
+        {gameState.gameMode === "challenge" || gameState.gameMode === "realChallenge" ? <span>投{gameState.round}目</span> : gameState.gameMode === "superChallenge" ? <span>素早く連投！</span> : <span>R{gameState.round}{gameState.round>ROUNDS_MAX?"（延長）":""} — <span style={{color:theme==="dark"?TEAM_COLOR[gameState.turn]:(gameState.turn===0?"#0284c7":"#db2777"),fontWeight:"bold"}}>{TEAM_NAME[gameState.turn]} P{gameState.playerIdx+1} の番</span></span>}
       </div>
 
       <div style={{position:"relative",width:"100%",maxWidth:CW}}>
@@ -1138,12 +1315,41 @@ function App() {
                   <div style={{color:"#fff",fontSize:13,marginBottom:16,textAlign:"center"}}>
                     <div>最終スコア: {gameState.score}点</div>
                     <div>最高連続成功: {gameState.maxStreak}投</div>
-                    <span style={{fontSize:12, color: "#fff",marginTop:8,display:"block"}}>記録をTwitter（現X）に投稿しよう！！</span>
+                    <span style={{fontSize:12, color: "#fff",marginTop:8,display:"block"}}>記録をXに投稿しよう！</span>
                   </div>
-                  <button onClick={() => {window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(`クルドゥガでチャレンジ！\n最終スコア: ${gameState.score}点\n最高連続成功: ${gameState.maxStreak}投\n#クルドゥガ\n#気にナウル`)}&url=${encodeURIComponent("\nhttps://dayu-otya.github.io/KRDG/")}`, '_blank');}} style={{width:"100%",padding:"8px 16px",background:"#1DA1F2",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer",marginBottom:10}}>Xで投稿する</button>
+                  <button onClick={() => {const challengeType = gameState.gameMode === "realChallenge" ? "ほんとうにチャレンジ" : "どこまでチャレンジ"; window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(`クルドゥガで${challengeType}！\n最終スコア: ${gameState.score}点\n最高連続成功: ${gameState.maxStreak}投\n#クルドゥガ\n#気にナウル`)}`, '_blank');}} style={{width:"100%",padding:"8px 16px",background:"#1DA1F2",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer",marginBottom:10}}>Xで投稿する</button>
                   <div style={{display:"flex",gap:10}}>
-                    <button onClick={() => {if(gameState.gameMode === "realChallenge"){addRealChallengeScore(gameState.score, gameState.maxStreak);}else{addScore(gameState.score, gameState.maxStreak);}if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}dispatchGame({type:"INIT_GAME",payload:{gameMode:gameState.gameMode}});}} style={{flex:1,padding:"10px 20px",background:"#ffd700",color:"#333",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
-                    <button onClick={() => {if(gameState.gameMode === "realChallenge"){addRealChallengeScore(gameState.score, gameState.maxStreak);}else{addScore(gameState.score, gameState.maxStreak);}if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
+                    <button onClick={() => {addRealChallengeScore(gameState.score, gameState.maxStreak);if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}dispatchGame({type:"INIT_GAME",payload:{gameMode:gameState.gameMode}});}} style={{flex:1,padding:"10px 20px",background:"#ffd700",color:"#333",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
+                    <button onClick={() => {addRealChallengeScore(gameState.score, gameState.maxStreak);if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
+                  </div>
+                </>
+              ) : gameState.gameMode === "superChallenge" ? (
+                <>
+                  <div style={{fontSize:22,fontWeight:"bold",color:"#ff6600",marginBottom:10,textAlign:"center"}}>30秒終了！</div>
+                  <div style={{color:"#fff",fontSize:13,marginBottom:16,textAlign:"center"}}>
+                    <div>最終スコア: {gameState.score}点</div>
+                    <div>投数: {gameState.round - 1}投</div>
+                    <span style={{fontSize:12, color: "#fff",marginTop:8,display:"block"}}>記録をXに投稿しよう！</span>
+                  </div>
+                  <button onClick={() => {window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(`クルドゥガで超枝投げ！\n30秒で${gameState.score}点！\n${gameState.round - 1}投\n#クルドゥガ\n#気にナウル`)}`, '_blank');}} style={{width:"100%",padding:"8px 16px",background:"#1DA1F2",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer",marginBottom:10}}>Xで投稿する</button>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={() => {addSuperChallengeScore(gameState.score, gameState.round - 1);if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}dispatchGame({type:"INIT_GAME",payload:{gameMode:"superChallenge"}});setTimeRemaining(30);}} style={{flex:1,padding:"10px 20px",background:"#ff6600",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
+                    <button onClick={() => {addSuperChallengeScore(gameState.score, gameState.round - 1);setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
+                  </div>
+                </>
+              ) : gameState.gameMode === "speedShot" ? (
+                <>
+                  <div style={{fontSize:22,fontWeight:"bold",color:"#0284c7",marginBottom:10,textAlign:"center"}}>ゴール達成！</div>
+                  <div style={{color:"#fff",fontSize:13,marginBottom:16,textAlign:"center"}}>
+                    <div>最終スコア: {gameState.score}点</div>
+                    <div>クリアタイム: {gameState.startTime ? Math.floor((Date.now() - gameState.startTime) / 1000) : 0}秒</div>
+                    <div>投数: {gameState.round - 1}投</div>
+                    <span style={{fontSize:12, color: "#fff",marginTop:8,display:"block"}}>記録をXに投稿しよう！</span>
+                  </div>
+                  <button onClick={() => {const time = gameState.startTime ? Math.floor((Date.now() - gameState.startTime) / 1000) : 0; window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(`クルドゥガでスピードショット！\n20点獲得: ${time}秒！\n${gameState.round - 1}投\n#クルドゥガ\n#気にナウル`)}`, '_blank');}} style={{width:"100%",padding:"8px 16px",background:"#1DA1F2",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer",marginBottom:10}}>Xで投稿する</button>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={() => {const time = gameState.startTime ? Math.floor((Date.now() - gameState.startTime) / 1000) : 0; addSpeedShotScore(gameState.score, time); if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);} dispatchGame({type:"INIT_GAME",payload:{gameMode:"speedShot"}});}} style={{flex:1,padding:"10px 20px",background:"#0284c7",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
+                    <button onClick={() => {const time = gameState.startTime ? Math.floor((Date.now() - gameState.startTime) / 1000) : 0; addSpeedShotScore(gameState.score, time); if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);} setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
                   </div>
                 </>
               ) : (
@@ -1161,13 +1367,15 @@ function App() {
         )}
       </div>
 
-      <div ref={logRef} style={{width:"100%",maxWidth:CW,marginTop:8,background:"rgba(0,0,0,0.3)",borderRadius:10,padding:"7px 12px",maxHeight:100,overflowY:"auto",fontSize:11,color:"#fff",lineHeight:1.8}}>
-        <div style={{color:"#fff",fontSize:10,marginBottom:2}}>投擲ログ</div>
-        {gameState.log.map((l, i) => (<div key={i} style={{color:l.includes("──")?"#ffd700":l.includes("あなた")?"#00d4ff":l.includes("AI")?"#ff6b9d":"#fff"}}>{l}</div>))}
+      <div ref={logRef} style={{width:"100%",maxWidth:CW,marginTop:8,background:THEME[theme].cardBg,borderRadius:10,padding:"7px 12px",maxHeight:100,overflowY:"auto",fontSize:11,color:THEME[theme].text,lineHeight:1.8}}>
+        <div style={{color:THEME[theme].text,fontSize:10,marginBottom:2}}>投擲ログ</div>
+        {gameState.log.map((l, i) => (<div key={i} style={{color:l.includes("──")?THEME[theme].accentPrimary:l.includes("あなた")?"#00d4ff":l.includes("AI")?"#ff6b9d":THEME[theme].text}}>{l}</div>))}
       </div>
     </div>
   );
-}    const root = ReactDOM.createRoot(document.getElementById('root'));
+}   
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
 </body>
