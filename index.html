@@ -210,6 +210,7 @@ function playSound(type, soundEnabled = true) {
     }
   } catch(e) {}
 }
+
 function shareScore(platform, gameMode, scoreData) {
   const messages = {
     challenge: `クルドゥガでどこまでチャレンジ！\n最終スコア: ${scoreData.score}点\n最高連続成功: ${scoreData.streak}投\n#クルドゥガ\n#気にナウル`,
@@ -224,7 +225,7 @@ function shareScore(platform, gameMode, scoreData) {
     window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
   } else if (platform === "Karotter") {
     window.open(`https://karotter.com/?tab=following=${encodeURIComponent(window.location.href)}&text=${encodeURIComponent(text)}`, '_blank');
-  } 
+  }
 }
 
 function initGameState(gameMode = "normal", maxStreakOverride = 0, customMaxRounds = ROUNDS_MAX) {
@@ -757,7 +758,7 @@ function drawDragPreview(ctx, inputState, gameState, animState) {
   ctx.fillText(`パワー ${Math.round(pct*100)}%`, gaugeX + 10, gaugeY + gaugeH/2);
 }
 
-function drawPlayers(ctx, gameState, animState, inputState, mode, keyboardInputState) {
+function drawPlayers(ctx, gameState, animState, inputState, mode) {
   if(!gameState || gameState.phase !== "throwing" || animState.isThrowing) return;
   [0, 1, 2].forEach(i => {
     const py = playerY(i);
@@ -776,21 +777,11 @@ function drawPlayers(ctx, gameState, animState, inputState, mode, keyboardInputS
     ctx.textBaseline = "middle";
     ctx.fillText(`P${i+1}`, THROW_X, py);
   });
-  
-  if(!inputState.ox && !keyboardInputState.isCharging) {
+  if(!inputState.ox) {
     ctx.fillStyle = TEAM_COLOR[gameState.gameMode === "challenge" || gameState.gameMode === "realChallenge" ? 0 : gameState.turn] + "dd";
     ctx.font = "11px sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("ドラッグして投げる", THROW_X, playerY(2) + 50);
-  }
-  
-  if(keyboardInputState.isCharging) {
-    const power = keyboardInputState.power;
-    const angle = keyboardInputState.angle;
-    ctx.fillStyle = TEAM_COLOR[gameState.turn] + "dd";
-    ctx.font = "11px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(`パワー: ${Math.round(power*100)}% | 角度: ${Math.round(angle * 180 / Math.PI)}°`, THROW_X, playerY(2) + 50);
   }
 }
 
@@ -832,7 +823,6 @@ function App() {
   const [animState, setAnimState] = useState({anim: null, isThrowing: false, lastResult: null});
   const [replayState, setReplayState] = useState({isReplaying: false, lastThrowData: null});
   const [timeRemaining, setTimeRemaining] = useState(30);
-  const [keyboardInputState, setKeyboardInputState] = useState({isCharging: false, power: 0, angle: 0});
   
   const { scores, addScore, resetScores } = useScoreStorage();
   const { stats: overallStats, addGameStats, resetStats } = useOverallStats();
@@ -932,7 +922,7 @@ function App() {
       animRef.current = requestAnimationFrame(tick);
     };
     animRef.current = requestAnimationFrame(tick);
-  }, [soundEnabled]);
+  }, [addShot]);
 
   const finishThrow = useCallback((result) => {
     setAnimState(prev => ({...prev, anim: null, isThrowing: false}));
@@ -947,8 +937,11 @@ function App() {
     
     if(gameMode === "practice") {
       logLine = result.hitMarutai && result.inZone ? `${s.round}投目: ${result.pts}点（命中位置: ${result.zoneIdx + 1}pt ゾーン）` : result.hitMarutai ? `${s.round}投目: 丸太命中 → ゾーン外` : `${s.round}投目: 外れ`;
-    } else if(gameMode === "challenge" || gameMode === "realChallenge") {
-      logLine = result.hitMarutai && result.inZone ? `${s.round}投目: ${result.pts}点ゲット！（合計${s.score + result.pts}点）` : result.hitMarutai ? `${s.round}投目: ゾーン外...（合計${s.score}点）` : `${s.round}投目: 外れ...`;
+    } else if(gameMode === "challenge") {
+  logLine = result.hitMarutai && result.inZone ? `${s.round}投目: ${result.pts}点ゲット！（合計${s.score + result.pts}点）` : result.hitMarutai ? `${s.round}投目: ゾーン外...（合計${s.score}点）` : `${s.round}投目: 外れ...`;
+} else if(gameMode === "realChallenge") {
+  logLine = result.hitMarutai && result.inZone ? `${s.round}投目: ${result.pts}点ゲット！（合計${s.score + result.pts}点）` : result.hitMarutai ? `${s.round}投目: ゾーン外...（合計${s.score}点）` : `${s.round}投目: 外れ...`;
+
     } else if(gameMode === "superChallenge") {
       logLine = result.hitMarutai && result.inZone ? `${s.round}投目: +${result.pts}点` : result.hitMarutai ? `${s.round}投目: ゾーン外` : `${s.round}投目: 外れ`;
     } else if(gameMode === "speedShot") {
@@ -962,7 +955,7 @@ function App() {
   }, [soundEnabled]);
 
   const playReplay = useCallback(() => {
-    if(!replayState.lastThrowData || animState.isThrowing) return;
+    if(!replayState.lastThrowData) return;
     setReplayState(prev => ({...prev, isReplaying: true}));
     setAnimState(prev => ({...prev, isThrowing: true, anim: {...replayState.lastThrowData, idx: 0}}));
     const fullPts = replayState.lastThrowData.pts;
@@ -978,9 +971,7 @@ function App() {
       animRef.current = requestAnimationFrame(tick);
     };
     animRef.current = requestAnimationFrame(tick);
-  }, [replayState.lastThrowData, animState.isThrowing]);
-
-  const prevDrawStateRef = useRef(null);
+  }, [replayState.lastThrowData]);
 
   useEffect(() => {
     const cvs = canvasRef.current;
@@ -994,7 +985,7 @@ function App() {
     if(gameState.roundMarkers) drawRoundMarkers(ctx, gameState.roundMarkers);
     if(animState.anim) drawProjectile(ctx, animState.anim);
     drawDragPreview(ctx, inputState, gameState, animState);
-    drawPlayers(ctx, gameState, animState, inputState, mode, keyboardInputState);
+    drawPlayers(ctx, gameState, animState, inputState, mode);
   }, [gameState, animState, inputState, mode, theme]);
 
   const getPos = (e) => {
@@ -1022,8 +1013,7 @@ function App() {
   }, [inputState.ox]);
 
   const onUp = useCallback((e) => {
-    if(!inputState.ox) return;
-    if(animState.isThrowing) return;
+    if(!inputState.ox || animState.isThrowing) return;
     e.preventDefault();
     const {ox, oy, cx, cy} = inputState;
     setInputState({ox: null, oy: null, cx: null, cy: null});
@@ -1035,72 +1025,6 @@ function App() {
   }, [inputState, animState.isThrowing, executeThrow]);
 
   useEffect(() => () => cancelAnimationFrame(animRef.current), []);
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if(animState.isThrowing || gameState.phase !== "throwing") return;
-      if(mode === "ai" && gameState.turn === 1) return;
-
-      if(e.code === "Space") {
-        e.preventDefault();
-        setKeyboardInputState(prev => ({...prev, isCharging: true}));
-      } else if(e.code === "ArrowUp" && keyboardInputState.isCharging) {
-        e.preventDefault();
-        setKeyboardInputState(prev => ({
-          ...prev,
-          angle: Math.max(prev.angle - 0.05, -Math.PI / 2),
-          power: Math.min(prev.power + 0.02, 1)
-        }));
-      } else if(e.code === "ArrowDown" && keyboardInputState.isCharging) {
-        e.preventDefault();
-        setKeyboardInputState(prev => ({
-          ...prev,
-          angle: Math.min(prev.angle + 0.05, Math.PI / 2),
-          power: Math.max(prev.power - 0.02, 0)
-        }));
-      } else if(e.code === "ArrowLeft" && keyboardInputState.isCharging) {
-        e.preventDefault();
-        setKeyboardInputState(prev => ({
-          ...prev,
-          angle: Math.min(prev.angle + 0.1, Math.PI / 2)
-        }));
-      } else if(e.code === "ArrowRight" && keyboardInputState.isCharging) {
-        e.preventDefault();
-        setKeyboardInputState(prev => ({
-          ...prev,
-          angle: Math.max(prev.angle - 0.1, -Math.PI / 2)
-        }));
-      }
-    };
-
-    const handleKeyUp = (e) => {
-      if(e.code === "Space" && keyboardInputState.isCharging) {
-        e.preventDefault();
-        const ox = THROW_X, oy = playerY(gameState.playerIdx);
-        const angle = keyboardInputState.angle;
-        const power = keyboardInputState.power;
-        
-        if(power < THROW_PARAMS.MIN_POWER) {
-          setKeyboardInputState({isCharging: false, power: 0, angle: 0});
-          return;
-        }
-
-        const dx = -Math.cos(angle) * power * PHYSICS.DRAG_MAX;
-        const dy = -Math.sin(angle) * power * PHYSICS.DRAG_MAX;
-        const {vx, vy} = dragToVelocity(dx, dy);
-        
-        executeThrow(ox, oy, vx, vy);
-        setKeyboardInputState({isCharging: false, power: 0, angle: 0});
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-    };
-  }, [animState.isThrowing, gameState.phase, gameState.turn, mode, gameState.playerIdx, keyboardInputState, executeThrow]);
 
   const TEAM_NAME = mode === "ai" ? TEAM_NAME_AI : TEAM_NAME_PVP;
   const total = (t) => gameState.scores[t].reduce((a, b) => a + b, 0);
@@ -1405,23 +1329,40 @@ function App() {
                     <button onClick={() => {setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
                   </div>
                 </>
-              ) : gameState.gameMode === "challenge" || gameState.gameMode === "realChallenge" ? (
-                <>
-                  <div style={{fontSize:22,fontWeight:"bold",color:"#ffd700",marginBottom:10,textAlign:"center"}}>ゲームオーバー</div>
-                  <div style={{color:"#fff",fontSize:13,marginBottom:16,textAlign:"center"}}>
-                    <div>最終スコア: {gameState.score}点</div>
-                    <div>最高連続成功: {gameState.maxStreak}投</div>
-                    <span style={{fontSize:12, color: "#fff",marginTop:8,display:"block"}}>記録をXに投稿しよう！</span>
-                  </div>
-                  <div style={{display:"flex",gap:10,marginBottom:10}}>
-  <button onClick={() => shareScore("twitter", gameState.gameMode, {score: gameState.score, streak: gameState.maxStreak})} style={{flex:1,padding:"8px 16px",background:"#1DA1F2",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer"}}>Xで投稿</button>
-  <button onClick={() => shareScore("Karotter", gameState.gameMode, {score: gameState.score, streak: gameState.maxStreak})} style={{flex:1,padding:"8px 16px",background:"#00B900",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer"}}>Karotterで投稿</button>
-</div>
-                  <div style={{display:"flex",gap:10}}>
-                    <button onClick={() => {addRealChallengeScore(gameState.score, gameState.maxStreak);if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}dispatchGame({type:"INIT_GAME",payload:{gameMode:gameState.gameMode}});}} style={{flex:1,padding:"10px 20px",background:"#ffd700",color:"#333",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
-                    <button onClick={() => {addRealChallengeScore(gameState.score, gameState.maxStreak);if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
-                  </div>
-                </>
+                            ) : gameState.gameMode === "challenge" ? (
+  <>
+    <div style={{fontSize:22,fontWeight:"bold",color:"#ffd700",marginBottom:10,textAlign:"center"}}>ゲームオーバー</div>
+    <div style={{color:"#fff",fontSize:13,marginBottom:16,textAlign:"center"}}>
+      <div>最終スコア: {gameState.score}点</div>
+      <div>最高連続成功: {gameState.maxStreak}投</div>
+      <span style={{fontSize:12, color: "#fff",marginTop:8,display:"block"}}>記録をXに投稿しよう！</span>
+    </div>
+    <div style={{display:"flex",gap:10,marginBottom:10}}>
+      <button onClick={() => shareScore("twitter", "challenge", {score: gameState.score, streak: gameState.maxStreak})} style={{flex:1,padding:"8px 16px",background:"#1DA1F2",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer"}}>Xで投稿</button>
+      <button onClick={() => shareScore("Karotter", "challenge", {score: gameState.score, streak: gameState.maxStreak})} style={{flex:1,padding:"8px 16px",background:"#00B900",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer"}}>Karotterで投稿</button>
+    </div>
+    <div style={{display:"flex",gap:10}}>
+      <button onClick={() => {addScore(gameState.score, gameState.maxStreak);if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}dispatchGame({type:"INIT_GAME",payload:{gameMode:"challenge"}});}} style={{flex:1,padding:"10px 20px",background:"#ffd700",color:"#333",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
+      <button onClick={() => {addScore(gameState.score, gameState.maxStreak);if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
+    </div>
+  </>
+) : gameState.gameMode === "realChallenge" ? (
+  <>
+    <div style={{fontSize:22,fontWeight:"bold",color:"#ff0000",marginBottom:10,textAlign:"center"}}>ゲームオーバー</div>
+    <div style={{color:"#fff",fontSize:13,marginBottom:16,textAlign:"center"}}>
+      <div>最終スコア: {gameState.score}点</div>
+      <div>最高連続成功: {gameState.maxStreak}投</div>
+      <span style={{fontSize:12, color: "#fff",marginTop:8,display:"block"}}>記録をXに投稿しよう！</span>
+    </div>
+    <div style={{display:"flex",gap:10,marginBottom:10}}>
+      <button onClick={() => shareScore("twitter", "realChallenge", {score: gameState.score, streak: gameState.maxStreak})} style={{flex:1,padding:"8px 16px",background:"#1DA1F2",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer"}}>Xで投稿</button>
+      <button onClick={() => shareScore("Karotter", "realChallenge", {score: gameState.score, streak: gameState.maxStreak})} style={{flex:1,padding:"8px 16px",background:"#00B900",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer"}}>Karotterで投稿</button>
+    </div>
+    <div style={{display:"flex",gap:10}}>
+      <button onClick={() => {addRealChallengeScore(gameState.score, gameState.maxStreak);if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}dispatchGame({type:"INIT_GAME",payload:{gameMode:"realChallenge"}});}} style={{flex:1,padding:"10px 20px",background:"#ff0000",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
+      <button onClick={() => {addRealChallengeScore(gameState.score, gameState.maxStreak);if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);}setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
+    </div>
+              </>
               ) : gameState.gameMode === "superChallenge" ? (
                 <>
                   <div style={{fontSize:22,fontWeight:"bold",color:"#ff6600",marginBottom:10,textAlign:"center"}}>30秒終了！</div>
@@ -1453,7 +1394,7 @@ function App() {
   <button onClick={() => {const time = gameState.startTime ? Math.floor((Date.now() - gameState.startTime) / 1000) : 0; shareScore("Karotter", "speedShot", {score: gameState.score, throws: gameState.round - 1, time});}} style={{flex:1,padding:"8px 16px",background:"#00B900",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:"bold",cursor:"pointer"}}>Karotterで投稿</button>
 </div>
                   <div style={{display:"flex",gap:10}}>
-                    <button onClick={() => {const time = gameState.startTime ? Math.floor((Date.now() - gameState.startTime) / 1000) : 0; addSpeedShotScore(gameState.score, time); if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);} dispatchGame({type:"INIT_GAME",payload:{gameMode:"speedShot"}});}} style={{flex:1,padding:"10px 20px",background:"#0284c7",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
+                    <button onClick={() => {const time = gameState.startTime ? Math.floor((Date.now() - gameState.startTime) / 1000) : 0; addSpeedShotScore(gameState.score, time); if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);} dispatchGame({type:"INIT_GAME",payload:{gameMode:"speedShot"}});}} style={{flex:1,padding:"10px 20px",background:"#ff6600",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>もう一度</button>
                     <button onClick={() => {const time = gameState.startTime ? Math.floor((Date.now() - gameState.startTime) / 1000) : 0; addSpeedShotScore(gameState.score, time); if(gameState.stats && gameState.stats.totalThrows !== undefined){addGameStats(gameState.stats);} setMode(null);dispatchGame({type:"INIT_GAME",payload:{gameMode:"normal",customMaxRounds:ROUNDS_MAX}});}} style={{flex:1,padding:"10px 20px",background:"rgba(255,255,255,0.2)",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:"bold",cursor:"pointer"}}>メニューへ</button>
                   </div>
                 </>
